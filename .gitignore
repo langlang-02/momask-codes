@@ -5,3 +5,6 @@ generation
 
 bones-seed
 dataset/BONES-SOMA
+
+glove
+slurm/logs

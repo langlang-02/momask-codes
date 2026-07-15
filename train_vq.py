@@ -71,10 +71,24 @@ if __name__ == "__main__":
         opt.max_motion_length = 196
         kinematic_chain = paramUtil.kit_kinematic_chain
         dataset_opt_path = './checkpoints/kit/Comp_v6_KLD005/opt.txt'
+    elif opt.dataset_name == "bones":
+        opt.data_root = './dataset/BONES-SOMA/'
+        opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
+        opt.text_dir = pjoin(opt.data_root, 'texts')
+        opt.joints_num = 22
+        dim_pose = 263
+        fps = 20
+        radius = 4
+        kinematic_chain = paramUtil.t2m_kinematic_chain
+        dataset_opt_path = pjoin(opt.save_root, 'opt.txt')
+        wrapper_opt_path = './checkpoints/t2m/Comp_v6_KLD005/opt.txt'
     else:
         raise KeyError('Dataset Does not Exists')
 
-    wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
+    if opt.dataset_name != "bones":
+        wrapper_opt_path = dataset_opt_path
+
+    wrapper_opt = get_opt(wrapper_opt_path, torch.device('cuda'))
     eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
     mean = np.load(pjoin(opt.data_root, 'Mean.npy'))

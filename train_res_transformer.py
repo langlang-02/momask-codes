@@ -96,6 +96,16 @@ if __name__ == '__main__':
         opt.max_motion_len = 55
         kinematic_chain = kit_kinematic_chain
         dataset_opt_path = './checkpoints/kit/Comp_v6_KLD005/opt.txt'
+    elif opt.dataset_name == 'bones':
+        opt.data_root = './dataset/BONES-SOMA'
+        opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
+        opt.joints_num = 22
+        opt.max_motion_len = 55
+        dim_pose = 263
+        radius = 4
+        fps = 20
+        kinematic_chain = t2m_kinematic_chain
+        dataset_opt_path = './checkpoints/t2m/Comp_v6_KLD005/opt.txt'
 
     else:
         raise KeyError('Dataset Does Not Exist')
@@ -161,7 +171,8 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=True)
 
-    eval_val_loader, _ = get_dataset_motion_loader(dataset_opt_path, 32, 'val', device=opt.device)
+    eval_dataset_opt_path = vq_opt_path if opt.dataset_name == 'bones' else dataset_opt_path
+    eval_val_loader, _ = get_dataset_motion_loader(eval_dataset_opt_path, 32, 'val', device=opt.device)
 
     wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
     eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
