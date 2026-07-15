@@ -1,6 +1,11 @@
 import math
 import numpy as np
 import matplotlib
+try:
+    import imageio_ffmpeg
+    matplotlib.rcParams['animation.ffmpeg_path'] = imageio_ffmpeg.get_ffmpeg_exe()
+except ImportError:
+    pass
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation, FFMpegFileWriter
@@ -11,6 +16,11 @@ import mpl_toolkits.mplot3d.axes3d as p3
 COLORS = [[255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], [170, 255, 0], [85, 255, 0], [0, 255, 0],
           [0, 255, 85], [0, 255, 170], [0, 255, 255], [0, 170, 255], [0, 85, 255], [0, 0, 255], [85, 0, 255],
           [170, 0, 255], [255, 0, 255], [255, 0, 170], [255, 0, 85]]
+
+
+def clear_3d_artists(ax):
+    for artist in list(ax.lines) + list(ax.collections):
+        artist.remove()
 
 
 def plot_2d_pose(pose, pose_tree, class_type, save_path=None, excluded_joints=None):
@@ -72,7 +82,7 @@ def list_cut_average(ll, intervals):
 def plot_3d_pose_v2(savePath, kinematic_tree, joints, title=None):
     figure = plt.figure()
     # ax = plt.axes(xlim=(-1, 1), ylim=(-1, 1), zlim=(-1, 1), projection='3d')
-    ax = Axes3D(figure)
+    ax = figure.add_subplot(111, projection='3d')
 #     ax.set_ylim(-1, 1)
 #     ax.set_xlim(-1, 1)
 #     ax.set_zlim(-1, 1)
@@ -112,8 +122,7 @@ def plot_3d_motion_v2(motion, kinematic_tree, save_path, interval=50, dataset=No
 
     motion = motion.reshape(motion.shape[0], -1, 3)
     fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    ax = p3.Axes3D(fig)
+    ax = fig.add_subplot(111, projection='3d')
     init()
 
     data = np.array(motion, dtype=float)
@@ -123,8 +132,7 @@ def plot_3d_motion_v2(motion, kinematic_tree, save_path, interval=50, dataset=No
     print(data.shape)
 
     def update(index):
-        ax.lines = []
-        ax.collections = []
+        clear_3d_artists(ax)
         ax.view_init(elev=110, azim=-90)
         ax.scatter(motion[index, :, 0], motion[index, :, 1], motion[index, :, 2], color='black')
         for chain, color in zip(kinematic_tree, colors):
@@ -176,7 +184,7 @@ def plot_3d_motion_kit(save_path, kinematic_tree, joints, title, figsize=(5, 5),
     # (seq_len, joints_num, 3)
     data = joints.reshape(len(joints), -1, 3)
     fig = plt.figure(figsize=figsize)
-    ax = p3.Axes3D(fig)
+    ax = fig.add_subplot(111, projection='3d')
     init()
     MINS = data.min(axis=0).min(axis=0)
     MAXS = data.max(axis=0).max(axis=0)
@@ -192,8 +200,7 @@ def plot_3d_motion_kit(save_path, kinematic_tree, joints, title, figsize=(5, 5),
 
     def update(index):
         #         print(index)
-        ax.lines = []
-        ax.collections = []
+        clear_3d_artists(ax)
         ax.view_init(elev=110, azim=-90)
         ax.dist = 7.5
         #         ax =
@@ -250,8 +257,7 @@ def plot_3d_motion_gt_pred(save_path, kinematic_tree, gt_joints, pred_joints, ti
 
     def update(index):
         for i, ax in enumerate(axs):
-            ax.lines = []
-            ax.collections = []
+            clear_3d_artists(ax)
             ax.view_init(elev=120, azim=-90)
             ax.dist = 7.5
 
@@ -354,7 +360,7 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, figsize=(10, 10), f
     # (seq_len, joints_num, 3)
     data = joints.copy().reshape(len(joints), -1, 3)
     fig = plt.figure(figsize=figsize)
-    ax = p3.Axes3D(fig)
+    ax = fig.add_subplot(111, projection='3d')
     init()
     MINS = data.min(axis=0).min(axis=0)
     MAXS = data.max(axis=0).max(axis=0)
@@ -375,8 +381,7 @@ def plot_3d_motion(save_path, kinematic_tree, joints, title, figsize=(10, 10), f
 
     def update(index):
         #         print(index)
-        ax.lines = []
-        ax.collections = []
+        clear_3d_artists(ax)
         ax.view_init(elev=120, azim=-90)
         ax.dist = 7.5
         #         ax =
@@ -428,8 +433,7 @@ def plot_3d_motion_old(motion, pose_tree, class_type, save_path, interval=300, e
         ax.set_title(class_type)
 
     fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    ax = p3.Axes3D(fig)
+    ax = fig.add_subplot(111, projection='3d')
     init()
 
     data = np.array(motion, dtype=float)
@@ -438,8 +442,7 @@ def plot_3d_motion_old(motion, pose_tree, class_type, save_path, interval=300, e
     print(data.shape)
 
     def update(index):
-        ax.lines = []
-        ax.collections = []
+        clear_3d_artists(ax)
         if excluded_joints is None:
             ax.scatter(data[index, :, 0], data[index, :, 1], data[index, :, 2], color='b', marker='h', s=15)
         else:
@@ -507,8 +510,7 @@ def plot_3d_multi_motion(motion_list, kinematic_tree, save_path, interval=50, da
         # ax.set_zlim(-1.0, 0.4)
 
     fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    ax = p3.Axes3D(fig)
+    ax = fig.add_subplot(111, projection='3d')
     init()
 
     colors = ['red', 'magenta', 'black', 'magenta', 'black', 'green', 'blue']
@@ -517,8 +519,7 @@ def plot_3d_multi_motion(motion_list, kinematic_tree, save_path, interval=50, da
     # print(data.shape)
     print("Number of motions %d" % (len(motion_list)))
     def update(index):
-        ax.lines = []
-        ax.collections = []
+        clear_3d_artists(ax)
         if dataset == "mocap":
             ax.view_init(elev=110, azim=-90)
         else:
@@ -543,6 +544,5 @@ def plot_3d_multi_motion(motion_list, kinematic_tree, save_path, interval=50, da
     # writer = Writer(fps=15, metadata={})
     ani.save(save_path, writer='pillow')
     plt.close()
-
 
 
