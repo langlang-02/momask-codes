@@ -182,6 +182,17 @@ def main() -> None:
     converted_rows = 0
     skipped = 0
 
+    def add_feature_stats(feature: np.ndarray) -> None:
+        nonlocal sum_vec, sum_sq_vec, frame_count
+        batch_sum = feature.sum(axis=0, dtype=np.float64)
+        batch_sq = np.square(feature.astype(np.float64)).sum(axis=0)
+        if sum_vec is None:
+            sum_vec = np.zeros_like(batch_sum)
+            sum_sq_vec = np.zeros_like(batch_sq)
+        sum_vec += batch_sum
+        sum_sq_vec += batch_sq
+        frame_count += feature.shape[0]
+
     iterator = rows if args.limit <= 0 else rows[: args.limit]
     for row in tqdm(iterator, desc="Converting BONES-SOMA"):
         if args.drop_mirrors and is_true(row.get("is_mirror")):
@@ -232,6 +243,7 @@ def main() -> None:
                 motion_path = motion_dir / f"{sample_id}.npy"
                 text_path = text_dir / f"{sample_id}.txt"
                 if motion_path.exists() and text_path.exists() and not args.overwrite:
+                    add_feature_stats(np.load(motion_path))
                     written_ids.append(sample_id)
                     continue
 
@@ -248,15 +260,7 @@ def main() -> None:
                 write_text_file(text_path, segment_captions)
                 written_ids.append(sample_id)
                 sample_idx += 1
-
-                batch_sum = feature.sum(axis=0, dtype=np.float64)
-                batch_sq = np.square(feature.astype(np.float64)).sum(axis=0)
-                if sum_vec is None:
-                    sum_vec = np.zeros_like(batch_sum)
-                    sum_sq_vec = np.zeros_like(batch_sq)
-                sum_vec += batch_sum
-                sum_sq_vec += batch_sq
-                frame_count += feature.shape[0]
+                add_feature_stats(feature)
 
         converted_rows += 1
 
