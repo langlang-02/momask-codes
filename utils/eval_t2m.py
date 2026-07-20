@@ -8,6 +8,13 @@ from utils.metrics import *
 import torch.nn.functional as F
 # import visualization.plot_3d_global as plot_3d
 from utils.motion_process import recover_from_ric
+
+
+def get_diversity_times(nb_sample):
+    if nb_sample < 2:
+        return 0
+    default_times = 300 if nb_sample > 300 else 100
+    return min(default_times, nb_sample - 1)
 #
 #
 # def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=None, outname=None):
@@ -69,8 +76,8 @@ def evaluation_vqvae(out_dir, val_loader, net, writer, ep, best_fid, best_div, b
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -204,8 +211,8 @@ def evaluation_vqvae_plus_mpjpe(val_loader, net, repeat_id, eval_wrapper, num_jo
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -287,8 +294,8 @@ def evaluation_vqvae_plus_l1(val_loader, net, repeat_id, eval_wrapper, num_joint
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -381,8 +388,8 @@ def evaluation_res_plus_l1(val_loader, vq_model, res_model, repeat_id, eval_wrap
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -478,8 +485,8 @@ def evaluation_mask_transformer(out_dir, val_loader, trans, vq_model, writer, ep
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -624,8 +631,8 @@ def evaluation_res_transformer(out_dir, val_loader, trans, vq_model, writer, ep,
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -770,8 +777,8 @@ def evaluation_res_transformer_plus_l1(val_loader, vq_model, trans, repeat_id, e
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -877,8 +884,8 @@ def evaluation_mask_transformer_test(val_loader, vq_model, trans, repeat_id, eva
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample
@@ -997,8 +1004,8 @@ def evaluation_mask_transformer_test_plus_res(val_loader, vq_model, res_model, t
     gt_mu, gt_cov = calculate_activation_statistics(motion_annotation_np)
     mu, cov = calculate_activation_statistics(motion_pred_np)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    diversity_real = calculate_diversity(motion_annotation_np, get_diversity_times(nb_sample))
+    diversity = calculate_diversity(motion_pred_np, get_diversity_times(nb_sample))
 
     R_precision_real = R_precision_real / nb_sample
     R_precision = R_precision / nb_sample

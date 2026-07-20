@@ -93,7 +93,9 @@ def calculate_activation_statistics(activations):
 
 def calculate_diversity(activation, diversity_times):
     assert len(activation.shape) == 2
-    assert activation.shape[0] > diversity_times
+    if activation.shape[0] < 2 or diversity_times <= 0:
+        return 0.0
+    diversity_times = min(diversity_times, activation.shape[0] - 1)
     num_samples = activation.shape[0]
 
     first_indices = np.random.choice(num_samples, diversity_times, replace=False)
@@ -145,7 +147,10 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
 
     diff = mu1 - mu2
 
-    # Product might be almost singular
+    sigma1 = (sigma1 + sigma1.T) / 2
+    sigma2 = (sigma2 + sigma2.T) / 2
+
+    # Product might be almost singular, especially on small validation splits.
     covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
     if not np.isfinite(covmean).all():
         msg = ('fid calculation produces singular product; '
@@ -156,15 +161,18 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
 
     # Numerical error might give slight imaginary component
     if np.iscomplexobj(covmean):
-        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+        for offset_scale in [eps, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
+            offset = np.eye(sigma1.shape[0]) * offset_scale
+            covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+            if not np.iscomplexobj(covmean) or np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+                break
+        if np.iscomplexobj(covmean):
             m = np.max(np.abs(covmean.imag))
-            raise ValueError('Imaginary component {}'.format(m))
+            print('Warning: fid calculation has imaginary component {}; using real part'.format(m))
         covmean = covmean.real
 
     tr_covmean = np.trace(covmean)
 
     return (diff.dot(diff) + np.trace(sigma1) +
             np.trace(sigma2) - 2 * tr_covmean)
-
-
 

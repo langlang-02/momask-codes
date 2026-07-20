@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=bones_mtrans
 #SBATCH --account=peilab
-#SBATCH --partition=preempt
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus=1
 #SBATCH --mem=64G
-#SBATCH --time=48:00:00
+#SBATCH --time=16:00:00
 #SBATCH --output=slurm/logs/%x-%j.out
 #SBATCH --error=slurm/logs/%x-%j.err
 

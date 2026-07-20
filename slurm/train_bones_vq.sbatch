@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=bones_vq
 #SBATCH --account=peilab
-#SBATCH --partition=preempt
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -24,12 +24,19 @@ BATCH_SIZE=${BATCH_SIZE:-256}
 MAX_EPOCH=${MAX_EPOCH:-50}
 NUM_QUANTIZERS=${NUM_QUANTIZERS:-6}
 WINDOW_SIZE=${WINDOW_SIZE:-64}
+IS_CONTINUE=${IS_CONTINUE:-0}
 
-python train_vq.py \
-  --dataset_name bones \
-  --name "$NAME" \
-  --gpu_id 0 \
-  --batch_size "$BATCH_SIZE" \
-  --max_epoch "$MAX_EPOCH" \
-  --num_quantizers "$NUM_QUANTIZERS" \
+args=(
+  --dataset_name bones
+  --name "$NAME"
+  --gpu_id 0
+  --batch_size "$BATCH_SIZE"
+  --max_epoch "$MAX_EPOCH"
+  --num_quantizers "$NUM_QUANTIZERS"
   --window_size "$WINDOW_SIZE"
+)
+if [ "$IS_CONTINUE" = "1" ]; then
+  args+=(--is_continue)
+fi
+
+python train_vq.py "${args[@]}"

@@ -48,11 +48,13 @@ def load_vq_model():
                 vq_opt.dilation_growth_rate,
                 vq_opt.vq_act,
                 vq_opt.vq_norm)
-    ckpt = torch.load(pjoin(vq_opt.checkpoints_dir, vq_opt.dataset_name, vq_opt.name, 'model', 'net_best_fid.tar'),
-                            map_location=opt.device)
+    best_path = pjoin(vq_opt.checkpoints_dir, vq_opt.dataset_name, vq_opt.name, 'model', 'net_best_fid.tar')
+    latest_path = pjoin(vq_opt.checkpoints_dir, vq_opt.dataset_name, vq_opt.name, 'model', 'latest.tar')
+    ckpt_path = best_path if os.path.exists(best_path) else latest_path
+    ckpt = torch.load(ckpt_path, map_location=opt.device)
     model_key = 'vq_model' if 'vq_model' in ckpt else 'net'
     vq_model.load_state_dict(ckpt[model_key])
-    print(f'Loading VQ Model {opt.vq_name}')
+    print(f'Loading VQ Model {opt.vq_name} from {ckpt_path}')
     vq_model.to(opt.device)
     return vq_model, vq_opt
 
@@ -171,6 +173,7 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=True)
 
+    vq_opt_path = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'opt.txt')
     eval_dataset_opt_path = vq_opt_path if opt.dataset_name == 'bones' else dataset_opt_path
     eval_val_loader, _ = get_dataset_motion_loader(eval_dataset_opt_path, 32, 'val', device=opt.device)
 

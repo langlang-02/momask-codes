@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ISAACLAB_DIR=/project/peilab/yanzhengyang/IsaacLab
-WORKSPACE_DIR=/project/peilab/yanzhengyang/workspace
-CACHE_DIR=/project/peilab/yanzhengyang/isaac-cache
-LOCAL_IMAGE=/project/peilab/yanzhengyang/containers/isaac-sim-5.1.0.sqsh
-SAVE_IMAGE=/project/peilab/yanzhengyang/containers/isaaclab-5.1.0-ready.sqsh
+# ISAACLAB_DIR=/project/peilab/yanzhengyang/IsaacLab
+# WORKSPACE_DIR=/project/peilab/yanzhengyang/workspace
+# CACHE_DIR=/project/peilab/yanzhengyang/isaac-cache
+# LOCAL_IMAGE=/project/peilab/yanzhengyang/containers/isaac-sim-5.1.0.sqsh
+# SAVE_IMAGE=/project/peilab/yanzhengyang/containers/isaaclab-5.1.0-ready.sqsh
 
 srun --account peilab \
     --partition preempt \

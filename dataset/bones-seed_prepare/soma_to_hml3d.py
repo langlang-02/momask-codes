@@ -55,9 +55,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-ratio", type=float, default=0.05)
     parser.add_argument("--test-ratio", type=float, default=0.05)
     parser.add_argument("--limit", type=int, default=0, help="Convert at most N metadata rows; 0 means all.")
+    parser.add_argument("--start-index", type=int, default=0, help="Start from this metadata row index.")
     parser.add_argument("--drop-mirrors", action="store_true", help="Skip rows marked as mirrored.")
     parser.add_argument("--use-temporal-labels", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--rebuild-stats",
+        action="store_true",
+        help="After conversion, rebuild Mean/Std and split files from all paired output files.",
+    )
     parser.add_argument("--print-joints", action="store_true", help="Print joints from the first readable BVH and exit.")
     return parser.parse_args()
 
@@ -193,8 +199,35 @@ def main() -> None:
         sum_sq_vec += batch_sq
         frame_count += feature.shape[0]
 
-    iterator = rows if args.limit <= 0 else rows[: args.limit]
-    for row in tqdm(iterator, desc="Converting BONES-SOMA"):
+    def rebuild_stats_from_existing() -> tuple[list[str], int]:
+        existing_ids = []
+        bad_files = 0
+        motion_paths = sorted(motion_dir.glob("*.npy"))
+        for motion_path in tqdm(motion_paths, desc="Rebuilding BONES-SOMA stats", miniters=1000):
+            sample_id = motion_path.stem
+            text_path = text_dir / f"{sample_id}.txt"
+            if not text_path.exists():
+                bad_files += 1
+                continue
+            try:
+                feature = np.load(motion_path)
+            except Exception as exc:
+                print(f"[skip] failed to load existing feature {motion_path}: {exc}", file=sys.stderr)
+                bad_files += 1
+                continue
+            if feature.ndim != 2 or feature.shape[1] != 263 or feature.shape[0] <= 0 or not np.isfinite(feature).all():
+                print(f"[skip] invalid existing feature {motion_path}: shape={feature.shape}", file=sys.stderr)
+                bad_files += 1
+                continue
+            add_feature_stats(feature)
+            existing_ids.append(sample_id)
+        return existing_ids, bad_files
+
+    start_index = max(args.start_index, 0)
+    iterator = rows[start_index:]
+    if args.limit > 0:
+        iterator = iterator[: args.limit]
+    for row in tqdm(iterator, desc="Converting BONES-SOMA", miniters=100):
         if args.drop_mirrors and is_true(row.get("is_mirror")):
             continue
 
@@ -243,8 +276,9 @@ def main() -> None:
                 motion_path = motion_dir / f"{sample_id}.npy"
                 text_path = text_dir / f"{sample_id}.txt"
                 if motion_path.exists() and text_path.exists() and not args.overwrite:
-                    add_feature_stats(np.load(motion_path))
-                    written_ids.append(sample_id)
+                    if not args.rebuild_stats:
+                        add_feature_stats(np.load(motion_path))
+                        written_ids.append(sample_id)
                     continue
 
                 try:
@@ -258,11 +292,19 @@ def main() -> None:
 
                 np.save(motion_path, feature)
                 write_text_file(text_path, segment_captions)
-                written_ids.append(sample_id)
+                if not args.rebuild_stats:
+                    written_ids.append(sample_id)
+                    add_feature_stats(feature)
                 sample_idx += 1
-                add_feature_stats(feature)
 
         converted_rows += 1
+
+    bad_existing = 0
+    if args.rebuild_stats:
+        sum_vec = None
+        sum_sq_vec = None
+        frame_count = 0
+        written_ids, bad_existing = rebuild_stats_from_existing()
 
     if not written_ids:
         raise RuntimeError("No samples were written. Check paths, mapping, and metadata filters.")
@@ -279,8 +321,10 @@ def main() -> None:
 
     print(f"Output root: {output_root}")
     print(f"Samples written/reused: {len(set(written_ids))}")
+    print(f"Metadata start index: {start_index}")
     print(f"Metadata rows converted: {converted_rows}")
     print(f"Skipped items: {skipped}")
+    print(f"Bad existing files skipped while rebuilding stats: {bad_existing}")
     print(f"Feature frames used for stats: {frame_count}")
 
 
