@@ -5,6 +5,8 @@ generation
 
 bones-seed
 dataset/BONES-SOMA
+dataset/BONES-G1
 
 glove
 slurm/logs
+log

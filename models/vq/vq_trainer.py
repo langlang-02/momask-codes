@@ -43,9 +43,15 @@ class RVQTokenizerTrainer:
         self.pred_motion = pred_motion
 
         loss_rec = self.l1_criterion(pred_motion, motions)
-        pred_local_pos = pred_motion[..., 4 : (self.opt.joints_num - 1) * 3 + 4]
-        local_pos = motions[..., 4 : (self.opt.joints_num - 1) * 3 + 4]
-        loss_explicit = self.l1_criterion(pred_local_pos, local_pos)
+        if self.opt.dataset_name == 'bones_g1':
+            # Preserve local temporal smoothness for native root-pose and joint-control values.
+            pred_velocity = pred_motion[:, 1:] - pred_motion[:, :-1]
+            target_velocity = motions[:, 1:] - motions[:, :-1]
+            loss_explicit = self.l1_criterion(pred_velocity, target_velocity)
+        else:
+            pred_local_pos = pred_motion[..., 4 : (self.opt.joints_num - 1) * 3 + 4]
+            local_pos = motions[..., 4 : (self.opt.joints_num - 1) * 3 + 4]
+            loss_explicit = self.l1_criterion(pred_local_pos, local_pos)
 
         loss = loss_rec + self.opt.loss_vel * loss_explicit + self.opt.commit * loss_commit
 
@@ -96,7 +102,8 @@ class RVQTokenizerTrainer:
         start_time = time.time()
         total_iters = self.opt.max_epoch * len(train_loader)
         print(f'Total Epochs: {self.opt.max_epoch}, Total Iters: {total_iters}')
-        print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_loader), len(eval_val_loader)))
+        eval_batches = len(eval_val_loader) if eval_val_loader is not None else 0
+        print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_loader), eval_batches))
         # val_loss = 0
         # min_val_loss = np.inf
         # min_val_epoch = epoch
@@ -104,11 +111,14 @@ class RVQTokenizerTrainer:
         logs = defaultdict(def_value, OrderedDict())
 
         # sys.exit()
-        best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_vqvae(
-            self.opt.model_dir, eval_val_loader, self.vq_model, self.logger, epoch, best_fid=1000,
-            best_div=100, best_top1=0,
-            best_top2=0, best_top3=0, best_matching=100,
-            eval_wrapper=eval_wrapper, save=False)
+        native_g1 = self.opt.dataset_name == 'bones_g1'
+        best_val_loss = np.inf
+        if not native_g1:
+            best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_vqvae(
+                self.opt.model_dir, eval_val_loader, self.vq_model, self.logger, epoch, best_fid=1000,
+                best_div=100, best_top1=0,
+                best_top2=0, best_top3=0, best_matching=100,
+                eval_wrapper=eval_wrapper, save=False)
 
         while epoch < self.opt.max_epoch:
             self.vq_model.train()
@@ -173,7 +183,8 @@ class RVQTokenizerTrainer:
             # val_loss = val_loss / (len(val_dataloader) + 1)
             # val_loss_rec = val_loss_rec / (len(val_dataloader) + 1)
             # val_loss_emb = val_loss_emb / (len(val_dataloader) + 1)
-            self.logger.add_scalar('Val/loss', sum(val_loss) / len(val_loss), epoch)
+            mean_val_loss = sum(val_loss) / len(val_loss)
+            self.logger.add_scalar('Val/loss', mean_val_loss, epoch)
             self.logger.add_scalar('Val/loss_rec', sum(val_loss_rec) / len(val_loss_rec), epoch)
             self.logger.add_scalar('Val/loss_vel', sum(val_loss_vel) / len(val_loss_vel), epoch)
             self.logger.add_scalar('Val/loss_commit', sum(val_loss_commit) / len(val_loss), epoch)
@@ -191,14 +202,29 @@ class RVQTokenizerTrainer:
             #     self.save(pjoin(self.opt.model_dir, 'finest.tar'), epoch, it)
             #     print('Best Validation Model So Far!~')
 
-            best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_vqvae(
-                self.opt.model_dir, eval_val_loader, self.vq_model, self.logger, epoch, best_fid=best_fid,
-                best_div=best_div, best_top1=best_top1,
-                best_top2=best_top2, best_top3=best_top3, best_matching=best_matching, eval_wrapper=eval_wrapper)
+            if native_g1:
+                if mean_val_loss < best_val_loss:
+                    self.save(pjoin(self.opt.model_dir, 'net_best_val.tar'), epoch, it)
+                    best_val_loss = mean_val_loss
+                    print(f'Best native G1 validation loss: {best_val_loss:.5f}')
+            else:
+                best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_vqvae(
+                    self.opt.model_dir, eval_val_loader, self.vq_model, self.logger, epoch, best_fid=best_fid,
+                    best_div=best_div, best_top1=best_top1,
+                    best_top2=best_top2, best_top3=best_top3, best_matching=best_matching, eval_wrapper=eval_wrapper)
 
 
-            if epoch % self.opt.eval_every_e == 0:
-                data = torch.cat([self.motions[:4], self.pred_motion[:4]], dim=0).detach().cpu().numpy()
+            if native_g1:
+                vis_every = getattr(self.opt, 'g1_vis_every_e', 10)
+                should_plot = vis_every > 0 and epoch % vis_every == 0
+                vis_samples = max(1, getattr(self.opt, 'g1_vis_samples', 1))
+            else:
+                should_plot = epoch % self.opt.eval_every_e == 0
+                vis_samples = 4
+            if plot_eval is not None and should_plot:
+                data = torch.cat(
+                    [self.motions[:vis_samples], self.pred_motion[:vis_samples]], dim=0
+                ).detach().cpu().numpy()
                 # np.save(pjoin(self.opt.eval_dir, 'E%04d.npy' % (epoch)), data)
                 save_dir = pjoin(self.opt.eval_dir, 'E%04d' % (epoch))
                 os.makedirs(save_dir, exist_ok=True)

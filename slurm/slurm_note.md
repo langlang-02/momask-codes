@@ -124,3 +124,45 @@ log/res/bones/<res_name>/
 ```bash
 tensorboard --logdir log --host 0.0.0.0 --port 6006
 ```
+
+## 6. G1 原生控制序列
+
+G1 流程使用 `dataset_name=bones_g1` 和 `dataset/BONES-G1/`。每帧是 35 维原生控制值：根平移 3 维（米）、根旋转 3 维（弧度）和 29 个 DoF（弧度）。它不会使用 HumanML3D 的 FID、R-precision 或人形 MP4 评估；RVQ、Mask Transformer 和 Residual Transformer 分别按验证重建损失、token 交叉熵保存 `net_best_val.tar`。
+
+转换 G1 CSV：
+
+```bash
+sbatch --export=ALL,LIMIT=0,OVERWRITE=0,REBUILD_STATS=1 slurm/convert_bones_g1.sbatch
+```
+
+`convert_bones_g1.sbatch` 在 `cpu` 分区运行，不申请 GPU；它会在需要时解压 `bones-seed/g1.tar.gz`，按 120 FPS 输入每隔 6 帧取样为 20 FPS，并生成 `Mean.npy`、`Std.npy`、`Min.npy` 和 `Max.npy`。`REBUILD_STATS=1` 适合全量完成或续跑的最后一次作业；`START_INDEX`、`LIMIT`、`DROP_MIRRORS`、`OVERWRITE` 的含义与 SOMA 转换脚本相同。
+
+三阶段训练：
+
+```bash
+sbatch --export=ALL,NAME=bones_g1_rvq_nq6,BATCH_SIZE=256,MAX_EPOCH=500,NUM_QUANTIZERS=6 slurm/train_bones_g1_vq.sbatch
+sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_mtrans,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_mtrans.sbatch
+sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_res,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_res.sbatch
+```
+
+`VQ_NAME` 必须匹配 G1 RVQ 实验名。若作业超时，给相同脚本追加 `IS_CONTINUE=1` 会从 `latest.tar` 继续。Mask 与 Residual 可在 RVQ 完成后并行训练，因为 Residual 训练用真值 RVQ token，不依赖已训练的 Mask Transformer。
+
+G1 RVQ 会每 10 个 epoch 在 `checkpoints/bones_g1/<name>/g1_visualization/E####/` 记录验证集 Ground Truth 与重建控制序列的 29 个 DoF 角度图、每关节 MAE/RMSE/最大误差 CSV。可在提交作业时加入 `G1_VIS_EVERY_E=...` 和 `G1_VIS_SAMPLES=...` 控制周期与样本数；`0` 会关闭可视化。
+
+生成 G1 CSV：
+
+```bash
+sbatch --export=ALL,MASK_NAME=bones_g1_mtrans,RES_NAME=bones_g1_res,TEXT_PROMPT="A person is walking forward.",MOTION_LENGTH=120,EXT=g1_walk slurm/generate_bones_g1.sbatch
+```
+
+输出位于 `generation/<EXT>/motions/`（20 FPS、米/弧度 `.npy`）和 `generation/<EXT>/g1_csv/`（默认上采样为 120 FPS 的 MuJoCo-compatible CSV）。生成值默认截断到训练数据观察范围；这只能避免明显越界，部署到真实 G1 前仍须经过关节限位、速度/加速度限位、平衡与碰撞安全控制。
+
+
+
+
+sbatch --export=ALL,NAME=bones_g1_rvq_nq6,G1_VIS_EVERY_E=10,G1_VIS_SAMPLES=2 slurm/train_bones_g1_vq.sbatch
+
+
+sbatch --dependency=afterok:483792 --export=ALL,NAME=bones_mtrans_full,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_mtrans.sbatch
+
+sbatch --dependency=afterok:483792 --export=ALL,NAME=bones_res_full,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500,COND_DROP_PROB=0.2,SHARE_WEIGHT=1 slurm/train_bones_g1_res.sbatch

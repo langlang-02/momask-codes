@@ -36,3 +36,21 @@ class EvalT2MOptions(BaseOptions):
         self.parser.add_argument("--motion_length", default=0, type=int,
                                  help="Motion length for generation, only applicable with single text prompt.")
         self.is_train = False
+
+
+class EvalG1Options(EvalT2MOptions):
+    """Generation options for native Unitree G1 control trajectories."""
+
+    def initialize(self):
+        super().initialize()
+        self.parser.set_defaults(which_epoch='net_best_val')
+        self.parser.add_argument('--g1_data_root', type=str, default='./dataset/BONES-G1',
+                                 help='Converted native G1 dataset directory.')
+        self.parser.add_argument('--model_fps', type=float, default=20.0,
+                                 help='Frame rate used while training the G1 model.')
+        self.parser.add_argument('--output_fps', type=float, default=120.0,
+                                 help='Frame rate written to the generated G1 CSV.')
+        self.parser.add_argument('--root_position_scale', type=float, default=0.01,
+                                 help='Meters-to-CSV root translation scale; BONES-SEED uses centimeters.')
+        self.parser.add_argument('--disable_data_range_clip', action='store_true',
+                                 help='Do not clip generated features to observed training-data ranges.')

@@ -48,9 +48,11 @@ def load_vq_model():
                 vq_opt.dilation_growth_rate,
                 vq_opt.vq_act,
                 vq_opt.vq_norm)
-    best_path = pjoin(vq_opt.checkpoints_dir, vq_opt.dataset_name, vq_opt.name, 'model', 'net_best_fid.tar')
-    latest_path = pjoin(vq_opt.checkpoints_dir, vq_opt.dataset_name, vq_opt.name, 'model', 'latest.tar')
-    ckpt_path = best_path if os.path.exists(best_path) else latest_path
+    checkpoint_dir = pjoin(vq_opt.checkpoints_dir, vq_opt.dataset_name, vq_opt.name, 'model')
+    candidates = ('net_best_val.tar', 'net_best_fid.tar', 'latest.tar')
+    ckpt_path = next((pjoin(checkpoint_dir, name) for name in candidates if os.path.exists(pjoin(checkpoint_dir, name))), None)
+    if ckpt_path is None:
+        raise FileNotFoundError(f'No RVQ checkpoint found in {checkpoint_dir}')
     ckpt = torch.load(ckpt_path, map_location='cpu')
     model_key = 'vq_model' if 'vq_model' in ckpt else 'net'
     vq_model.load_state_dict(ckpt[model_key])
@@ -107,6 +109,16 @@ if __name__ == '__main__':
         fps = 20
         kinematic_chain = t2m_kinematic_chain
         dataset_opt_path = './checkpoints/t2m/Comp_v6_KLD005/opt.txt'
+    elif opt.dataset_name == 'bones_g1':
+        opt.data_root = './dataset/BONES-G1'
+        opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
+        opt.joints_num = 0
+        opt.max_motion_len = 55
+        dim_pose = 35
+        radius = 0
+        fps = 20
+        kinematic_chain = None
+        dataset_opt_path = None
 
     else:
         raise KeyError('Dataset Does Not Exist')
@@ -114,6 +126,7 @@ if __name__ == '__main__':
     opt.text_dir = pjoin(opt.data_root, 'texts')
 
     vq_model, vq_opt = load_vq_model()
+    opt.unit_length = vq_opt.stride_t ** vq_opt.down_t
 
     clip_version = 'ViT-B/32'
 
@@ -152,16 +165,23 @@ if __name__ == '__main__':
     train_dataset = Text2MotionDataset(opt, mean, std, train_split_file)
     val_dataset = Text2MotionDataset(opt, mean, std, val_split_file)
 
-    train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=True)
+    # Keep undersized native-G1 splits usable for conversion and training smoke tests.
+    drop_last = opt.dataset_name != 'bones_g1'
+    train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=drop_last)
+    val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=drop_last)
 
-    vq_opt_path = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'opt.txt')
-    eval_dataset_opt_path = vq_opt_path if opt.dataset_name == 'bones' else dataset_opt_path
-    eval_val_loader, _ = get_dataset_motion_loader(eval_dataset_opt_path, 32, 'val', device=opt.device)
-
-    wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
-    eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
+    if opt.dataset_name == 'bones_g1':
+        eval_val_loader = None
+        eval_wrapper = None
+        plot_eval = None
+    else:
+        vq_opt_path = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'opt.txt')
+        eval_dataset_opt_path = vq_opt_path if opt.dataset_name == 'bones' else dataset_opt_path
+        eval_val_loader, _ = get_dataset_motion_loader(eval_dataset_opt_path, 32, 'val', device=opt.device)
+        wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
+        eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
+        plot_eval = plot_t2m
 
     trainer = MaskTransformerTrainer(opt, t2m_transformer, vq_model)
 
-    trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper=eval_wrapper, plot_eval=plot_t2m)
+    trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper=eval_wrapper, plot_eval=plot_eval)

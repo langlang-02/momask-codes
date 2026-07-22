@@ -18,6 +18,7 @@ from motion_loaders.dataset_motion_loader import get_dataset_motion_loader
 from utils.motion_process import recover_from_ric
 from utils.plot_script import plot_3d_motion
 from utils.fixseed import fixseed
+from visualization.plot_g1_joint_angles import plot_joint_angle_batch
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -28,6 +29,18 @@ def plot_t2m(data, save_dir):
         joint = recover_from_ric(torch.from_numpy(joint_data).float(), opt.joints_num).numpy()
         save_path = pjoin(save_dir, '%02d.mp4' % (i))
         plot_3d_motion(save_path, kinematic_chain, joint, title="None", fps=fps, radius=radius)
+
+
+def plot_g1(data, save_dir):
+    data = train_dataset.inv_transform(data)
+    sample_count = len(data) // 2
+    plot_joint_angle_batch(
+        data[:sample_count],
+        data[sample_count:],
+        save_dir,
+        fps=fps,
+        prediction_label='RVQ reconstruction',
+    )
 
 
 if __name__ == "__main__":
@@ -41,7 +54,7 @@ if __name__ == "__main__":
     opt.save_root = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.name)
     opt.model_dir = pjoin(opt.save_root, 'model')
     opt.meta_dir = pjoin(opt.save_root, 'meta')
-    opt.eval_dir = pjoin(opt.save_root, 'animation')
+    opt.eval_dir = pjoin(opt.save_root, 'g1_visualization' if opt.dataset_name == 'bones_g1' else 'animation')
     opt.log_dir = pjoin('./log/vq/', opt.dataset_name, opt.name)
 
     os.makedirs(opt.model_dir, exist_ok=True)
@@ -82,14 +95,27 @@ if __name__ == "__main__":
         kinematic_chain = paramUtil.t2m_kinematic_chain
         dataset_opt_path = pjoin(opt.save_root, 'opt.txt')
         wrapper_opt_path = './checkpoints/t2m/Comp_v6_KLD005/opt.txt'
+    elif opt.dataset_name == "bones_g1":
+        opt.data_root = './dataset/BONES-G1/'
+        opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
+        opt.text_dir = pjoin(opt.data_root, 'texts')
+        opt.joints_num = 0
+        dim_pose = 35
+        fps = 20
+        radius = 0
+        kinematic_chain = None
+        dataset_opt_path = None
     else:
         raise KeyError('Dataset Does not Exists')
 
-    if opt.dataset_name != "bones":
+    if opt.dataset_name not in ("bones", "bones_g1"):
         wrapper_opt_path = dataset_opt_path
 
-    wrapper_opt = get_opt(wrapper_opt_path, torch.device('cuda'))
-    eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
+    if opt.dataset_name == "bones_g1":
+        eval_wrapper = None
+    else:
+        wrapper_opt = get_opt(wrapper_opt_path, torch.device('cuda'))
+        eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
     mean = np.load(pjoin(opt.data_root, 'Mean.npy'))
     std = np.load(pjoin(opt.data_root, 'Std.npy'))
@@ -123,12 +149,19 @@ if __name__ == "__main__":
     train_dataset = MotionDataset(opt, mean, std, train_split_file)
     val_dataset = MotionDataset(opt, mean, std, val_split_file)
 
-    train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, drop_last=True, num_workers=4,
+    # Keep undersized native-G1 splits usable for conversion and training smoke tests.
+    drop_last = opt.dataset_name != "bones_g1"
+    train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, drop_last=drop_last, num_workers=4,
                               shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, drop_last=True, num_workers=4,
+    val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, drop_last=drop_last, num_workers=4,
                             shuffle=True, pin_memory=True)
-    eval_val_loader, _ = get_dataset_motion_loader(dataset_opt_path, 32, 'val', device=opt.device)
-    trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper, plot_t2m)
+    if opt.dataset_name == "bones_g1":
+        eval_val_loader = None
+        plot_eval = plot_g1
+    else:
+        eval_val_loader, _ = get_dataset_motion_loader(dataset_opt_path, 32, 'val', device=opt.device)
+        plot_eval = plot_t2m
+    trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper, plot_eval)
 
 ## train_vq.py --dataset_name kit --batch_size 512 --name VQVAE_dp2 --gpu_id 3
 ## train_vq.py --dataset_name kit --batch_size 256 --name VQVAE_dp2_b256 --gpu_id 2

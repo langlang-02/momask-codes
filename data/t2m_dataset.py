@@ -38,7 +38,11 @@ class MotionDataset(data.Dataset):
 
         self.cumsum = np.cumsum([0] + self.lengths)
 
-        if opt.is_train:
+        if opt.is_train and opt.dataset_name == 'bones_g1':
+            # G1 uses native root pose and joint controls, not HumanML3D's 263-D layout.
+            np.save(pjoin(opt.meta_dir, 'mean.npy'), mean)
+            np.save(pjoin(opt.meta_dir, 'std.npy'), std)
+        elif opt.is_train:
             # root_rot_velocity (B, seq_len, 1)
             std[0:1] = std[0:1] / opt.feat_bias
             # root_linear_velocity (B, seq_len, 2)
@@ -94,7 +98,7 @@ class Text2MotionDatasetEval(data.Dataset):
         self.max_length = 20
         self.pointer = 0
         self.max_motion_length = opt.max_motion_length
-        min_motion_len = 40 if self.opt.dataset_name in ('t2m', 'bones') else 24
+        min_motion_len = 40 if self.opt.dataset_name in ('t2m', 'bones', 'bones_g1') else 24
 
         data_dict = {}
         id_list = []
@@ -233,7 +237,7 @@ class Text2MotionDataset(data.Dataset):
         self.max_length = 20
         self.pointer = 0
         self.max_motion_length = opt.max_motion_length
-        min_motion_len = 40 if self.opt.dataset_name in ('t2m', 'bones') else 24
+        min_motion_len = 40 if self.opt.dataset_name in ('t2m', 'bones', 'bones_g1') else 24
 
         data_dict = {}
         id_list = []

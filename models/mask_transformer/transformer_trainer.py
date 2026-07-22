@@ -43,7 +43,7 @@ class MaskTransformerTrainer:
 
         # (b, n, q)
         code_idx, _ = self.vq_model.encode(motion)
-        m_lens = m_lens // 4
+        m_lens = m_lens // self.opt.unit_length
 
         conds = conds.to(self.device).float() if torch.is_tensor(conds) else conds
 
@@ -116,13 +116,16 @@ class MaskTransformerTrainer:
         print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_loader), len(val_loader)))
         logs = defaultdict(def_value, OrderedDict())
 
-        best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_mask_transformer(
-            self.opt.save_root, eval_val_loader, self.t2m_transformer, self.vq_model, self.logger, epoch,
-            best_fid=100, best_div=100,
-            best_top1=0, best_top2=0, best_top3=0,
-            best_matching=100, eval_wrapper=eval_wrapper,
-            plot_func=plot_eval, save_ckpt=False, save_anim=False
-        )
+        native_g1 = self.opt.dataset_name == 'bones_g1'
+        best_val_loss = np.inf
+        if not native_g1:
+            best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_mask_transformer(
+                self.opt.save_root, eval_val_loader, self.t2m_transformer, self.vq_model, self.logger, epoch,
+                best_fid=100, best_div=100,
+                best_top1=0, best_top2=0, best_top3=0,
+                best_matching=100, eval_wrapper=eval_wrapper,
+                plot_func=plot_eval, save_ckpt=False, save_anim=False
+            )
         best_acc = 0.
 
         while epoch < self.opt.max_epoch:
@@ -172,17 +175,23 @@ class MaskTransformerTrainer:
             self.logger.add_scalar('Val/loss', np.mean(val_loss), epoch)
             self.logger.add_scalar('Val/acc', np.mean(val_acc), epoch)
 
+            if native_g1 and np.mean(val_loss) < best_val_loss:
+                self.save(pjoin(self.opt.model_dir, 'net_best_val.tar'), epoch, it)
+                best_val_loss = np.mean(val_loss)
+                print(f"Best native G1 validation loss: {best_val_loss:.5f}")
+
             if np.mean(val_acc) > best_acc:
                 print(f"Improved accuracy from {best_acc:.02f} to {np.mean(val_acc)}!!!")
                 self.save(pjoin(self.opt.model_dir, 'net_best_acc.tar'), epoch, it)
                 best_acc = np.mean(val_acc)
 
-            best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_mask_transformer(
-                self.opt.save_root, eval_val_loader, self.t2m_transformer, self.vq_model, self.logger, epoch, best_fid=best_fid,
-                best_div=best_div, best_top1=best_top1, best_top2=best_top2, best_top3=best_top3,
-                best_matching=best_matching, eval_wrapper=eval_wrapper,
-                plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0)
-            )
+            if not native_g1:
+                best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_mask_transformer(
+                    self.opt.save_root, eval_val_loader, self.t2m_transformer, self.vq_model, self.logger, epoch, best_fid=best_fid,
+                    best_div=best_div, best_top1=best_top1, best_top2=best_top2, best_top3=best_top3,
+                    best_matching=best_matching, eval_wrapper=eval_wrapper,
+                    plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0)
+                )
 
 
 class ResidualTransformerTrainer:
@@ -215,7 +224,7 @@ class ResidualTransformerTrainer:
 
         # (b, n, q), (q, b, n ,d)
         code_idx, all_codes = self.vq_model.encode(motion)
-        m_lens = m_lens // 4
+        m_lens = m_lens // self.opt.unit_length
 
         conds = conds.to(self.device).float() if torch.is_tensor(conds) else conds
 
@@ -284,14 +293,16 @@ class ResidualTransformerTrainer:
         print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_loader), len(val_loader)))
         logs = defaultdict(def_value, OrderedDict())
 
-        best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_res_transformer(
-            self.opt.save_root, eval_val_loader, self.res_transformer, self.vq_model, self.logger, epoch,
-            best_fid=100, best_div=100,
-            best_top1=0, best_top2=0, best_top3=0,
-            best_matching=100, eval_wrapper=eval_wrapper,
-            plot_func=plot_eval, save_ckpt=False, save_anim=False
-        )
-        best_loss = 100
+        native_g1 = self.opt.dataset_name == 'bones_g1'
+        if not native_g1:
+            best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_res_transformer(
+                self.opt.save_root, eval_val_loader, self.res_transformer, self.vq_model, self.logger, epoch,
+                best_fid=100, best_div=100,
+                best_top1=0, best_top2=0, best_top3=0,
+                best_matching=100, eval_wrapper=eval_wrapper,
+                plot_func=plot_eval, save_ckpt=False, save_anim=False
+            )
+        best_loss = np.inf
         best_acc = 0
 
         while epoch < self.opt.max_epoch:
@@ -344,6 +355,8 @@ class ResidualTransformerTrainer:
             if np.mean(val_loss) < best_loss:
                 print(f"Improved loss from {best_loss:.02f} to {np.mean(val_loss)}!!!")
                 self.save(pjoin(self.opt.model_dir, 'net_best_loss.tar'), epoch, it)
+                if native_g1:
+                    self.save(pjoin(self.opt.model_dir, 'net_best_val.tar'), epoch, it)
                 best_loss = np.mean(val_loss)
 
             if np.mean(val_acc) > best_acc:
@@ -351,9 +364,10 @@ class ResidualTransformerTrainer:
                 # self.save(pjoin(self.opt.model_dir, 'net_best_loss.tar'), epoch, it)
                 best_acc = np.mean(val_acc)
 
-            best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_res_transformer(
-                self.opt.save_root, eval_val_loader, self.res_transformer, self.vq_model, self.logger, epoch, best_fid=best_fid,
-                best_div=best_div, best_top1=best_top1, best_top2=best_top2, best_top3=best_top3,
-                best_matching=best_matching, eval_wrapper=eval_wrapper,
-                plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0)
-            )
+            if not native_g1:
+                best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_res_transformer(
+                    self.opt.save_root, eval_val_loader, self.res_transformer, self.vq_model, self.logger, epoch, best_fid=best_fid,
+                    best_div=best_div, best_top1=best_top1, best_top2=best_top2, best_top3=best_top3,
+                    best_matching=best_matching, eval_wrapper=eval_wrapper,
+                    plot_func=plot_eval, save_ckpt=True, save_anim=(epoch%self.opt.eval_every_e==0)
+                )

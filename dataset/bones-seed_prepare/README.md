@@ -110,3 +110,44 @@ fps = 20
 kinematic_chain = t2m_kinematic_chain
 ```
 
+## G1 原生控制序列
+
+`g1_to_momask.py` 不将机器人动作转成人形 263 维特征，而是保留 35 维控制表示：根平移 3 维（米）、根旋转 3 维（弧度）和 29 个 G1 DoF（弧度）。输入 CSV 的根平移单位为厘米，旋转与 DoF 单位为度；转换与生成时会自动互相还原。
+
+小规模转换：
+
+```bash
+python dataset/bones-seed_prepare/g1_to_momask.py \
+  --bones-root bones-seed \
+  --metadata bones-seed/metadata/seed_metadata_v004.csv \
+  --output-root dataset/BONES-G1 \
+  --limit 20 --overwrite
+```
+
+全量完成或续跑最后一次必须加入 `--rebuild-stats`，让 `Mean.npy`、`Std.npy`、`Min.npy`、`Max.npy` 和 split 基于全部已转换样本重建：
+
+```bash
+python dataset/bones-seed_prepare/g1_to_momask.py \
+  --bones-root bones-seed \
+  --output-root dataset/BONES-G1 \
+  --rebuild-stats
+```
+
+该转换按官方 120 FPS CSV 每隔 6 帧取样，输出 20 FPS 的最多 196 帧动作窗口。输出目录仍使用 `new_joint_vecs/` 这个历史目录名以复用 MoMask 数据加载器，但其中 `.npy` 的 shape 为 `(frames, 35)`，不是 HumanML3D 的 263 维特征。
+
+### RVQ 关节角可视化
+
+训练 `bones_g1` RVQ 时，每 10 个 epoch 默认会在
+`checkpoints/bones_g1/<name>/g1_visualization/E####/` 写入验证集的关节角对比图和误差表。PNG 的每个面板显示一个 G1 DoF：黑线为 Ground Truth，青色虚线为 RVQ 重建，橙线为右轴的绝对角度误差；CSV 提供每个关节的 MAE、RMSE 和最大误差，单位都是度。它用于检查 tokenization/reconstruction，不是 Transformer 随机文本生成的最终评估。
+
+用 `--g1_vis_every_e 10` 调整周期，或用 `--g1_vis_every_e 0` 关闭；`--g1_vis_samples 2` 可在每个周期输出两个验证样本。
+
+也可以独立比较两条同 FPS 轨迹：
+
+```bash
+python visualization/plot_g1_joint_angles.py \
+  --ground_truth dataset/BONES-G1/new_joint_vecs/<sample>.npy \
+  --prediction generation/<ext>/motions/<sample>.npy \
+  --output_dir generation/<ext>/joint_angle_plots \
+  --fps 20 --prediction_label "Generated"
+```
