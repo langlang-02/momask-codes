@@ -159,10 +159,63 @@ sbatch --export=ALL,MASK_NAME=bones_g1_mtrans,RES_NAME=bones_g1_res,TEXT_PROMPT=
 
 
 
-
+训练rvq
 sbatch --export=ALL,NAME=bones_g1_rvq_nq6,G1_VIS_EVERY_E=10,G1_VIS_SAMPLES=2 slurm/train_bones_g1_vq.sbatch
 
+训练mtrans
+sbatch --export=ALL,NAME=bones_g1_mtrans,VQ_NAME=bones_g1_rvq_nq6,IS_CONTINUE=0 slurm/train_bones_g1_mtrans.sbatch
+第一次启动时设置is_continue=0,否则会找不到之前的训练结果而报错
 
-sbatch --dependency=afterok:483792 --export=ALL,NAME=bones_mtrans_full,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_mtrans.sbatch
+--dependency=afterok:483792 --export  #一定要加在export前
 
-sbatch --dependency=afterok:483792 --export=ALL,NAME=bones_res_full,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500,COND_DROP_PROB=0.2,SHARE_WEIGHT=1 slurm/train_bones_g1_res.sbatch
+
+训练res-trans
+sbatch --export=ALL,NAME=bones_g1_res,VQ_NAME=bones_g1_rvq_nq6,IS_CONTINUE=0 slurm/train_bones_g1_res.sbatch
+
+
+
+g1动作渲染:
+sbatch --export=ALL,MOTION=dataset/BONES-G1/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,OUTPUT_MP4=generation/g1_replay.mp4 g1_visualize/render_g1.sbatch
+
+读取最新的rvq checkpoint，渲染重建效果
+srun --account=peilab --partition=normal --nodes=1 --ntasks=1 --cpus-per-task=4 --gpus=1 --time=00:20:00 \
+  --export=ALL,MOTION=dataset/BONES-G1/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,VQ_NAME=bones_g1_rvq_nq6,CHECKPOINT=latest bash g1_visualize/reconstruct_g1_srun.sh
+
+
+按原始csv重建
+srun --account=peilab --partition=normal --nodes=1 --ntasks=1 \
+    --cpus-per-task=4 --gpus=1 --time=00:20:00 \
+    --export=ALL,MOTION=bones-seed/g1/csv/230227/come_down_50cm_box_R_002__A219_M.csv,VQ_NAME=bones_g1_rvq_nq6,CHECKPOINT=latest \
+    bash g1_visualize/reconstruct_g1_srun.sh
+
+
+bones-seed/g1/csv/230301/body_check_001__A230.csv
+
+
+
+
+验证t2m生成效果
+
+
+TEXT_PROMPT='A person rotates the door knob with their right hand.' \
+  sbatch --export=ALL,MASK_NAME=bones_g1_mtrans,RES_NAME=bones_g1_res,MOTION_LENGTH=64 \
+    slurm/generate_bones_g1.sbatch
+
+
+可测试的、贴近验证集的 prompt：
+
+A person is standing with the right leg positioned ahead, facing forward.
+A person stands idle with a subtle tilt in the hips and the arms to the side, facing forward.
+A person slowly walks backward and turns to the left side.
+A person is walking backwards while looking in the right diagonal direction.
+A person steps backward with the right leg and then turns over the left shoulder to face left.
+A person makes a quick horizontal jump toward their left side.
+
+也建议测训练分布内但动作更明显的例子：
+
+A person stands in a place while holding a small, heavy object in their right hand.
+A standing person is repeatedly pushing and pulling both hands forward and backward.
+
+A person brushes off dust from their right shoulder with the left arm.
+
+A person rotates the door knob with their right hand.

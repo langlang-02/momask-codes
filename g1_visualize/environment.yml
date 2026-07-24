@@ -1,0 +1,12 @@
+name: g1-mujoco
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - mujoco==3.10.0
+      - numpy
+      - scipy
+      - imageio
+      - imageio-ffmpeg

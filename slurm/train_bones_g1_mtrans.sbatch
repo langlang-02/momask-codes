@@ -18,7 +18,7 @@ conda activate momask-h800
 export OMP_NUM_THREADS=1
 NAME=${NAME:-bones_g1_mtrans}
 VQ_NAME=${VQ_NAME:-bones_g1_rvq_nq6}
-BATCH_SIZE=${BATCH_SIZE:-64}
+BATCH_SIZE=${BATCH_SIZE:-2048}
 MAX_EPOCH=${MAX_EPOCH:-500}
 IS_CONTINUE=${IS_CONTINUE:-1}
 
