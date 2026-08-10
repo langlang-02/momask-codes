@@ -25,7 +25,7 @@ HEADER_HEIGHT = 42
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Render a labelled side-by-side comparison of two 35-D G1 trajectories."
+        description="Render a labelled side-by-side comparison of two 38-D G1 trajectories."
     )
     parser.add_argument("--reference_motion", type=Path, required=True, help="Ground-truth G1 .csv or .npy.")
     parser.add_argument("--prediction_motion", type=Path, required=True, help="RVQ reconstruction G1 .csv or .npy.")
@@ -91,8 +91,8 @@ def compose_panels(
 
 def main() -> None:
     args = parse_args()
-    reference, reference_default_fps = load_motion(args.reference_motion)
-    prediction, prediction_default_fps = load_motion(args.prediction_motion)
+    reference, reference_default_fps = load_motion(args.reference_motion, args.root_euler_order)
+    prediction, prediction_default_fps = load_motion(args.prediction_motion, args.root_euler_order)
     if args.input_fps is None and reference_default_fps != prediction_default_fps:
         raise ValueError(
             "Input formats imply different frame rates; specify --input_fps after resampling the trajectories."
@@ -156,7 +156,6 @@ def main() -> None:
                     reference[frame_index],
                     reference_root_qposadr,
                     reference_joint_qposadrs,
-                    args.root_euler_order,
                     args.clip_joint_limits,
                     frame_index,
                     input_fps,
@@ -167,7 +166,6 @@ def main() -> None:
                     prediction[frame_index],
                     prediction_root_qposadr,
                     prediction_joint_qposadrs,
-                    args.root_euler_order,
                     args.clip_joint_limits,
                     frame_index,
                     input_fps,

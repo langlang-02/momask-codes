@@ -212,7 +212,7 @@ def main() -> None:
     mean = np.load(Path(vq_opt.checkpoints_dir) / vq_opt.dataset_name / vq_opt.name / "meta" / "mean.npy")
     std = np.load(Path(vq_opt.checkpoints_dir) / vq_opt.dataset_name / vq_opt.name / "meta" / "std.npy")
     if mean.shape != (G1_FEATURE_DIM,) or std.shape != (G1_FEATURE_DIM,):
-        raise ValueError("RVQ normalization metadata does not match the 35-D G1 representation")
+        raise ValueError("RVQ normalization metadata does not match the 38-D G1 representation")
 
     data_min = data_max = None
     if not opt.disable_data_range_clip:

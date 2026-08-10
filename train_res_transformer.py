@@ -111,11 +111,11 @@ if __name__ == '__main__':
         kinematic_chain = t2m_kinematic_chain
         dataset_opt_path = './checkpoints/t2m/Comp_v6_KLD005/opt.txt'
     elif opt.dataset_name == 'bones_g1':
-        opt.data_root = './dataset/BONES-G1'
+        opt.data_root = opt.g1_data_root
         opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
         opt.joints_num = 0
         opt.max_motion_len = 55
-        dim_pose = 35
+        dim_pose = 38
         radius = 0
         fps = 20
         kinematic_chain = None

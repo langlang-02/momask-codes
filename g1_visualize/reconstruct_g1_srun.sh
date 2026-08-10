@@ -8,8 +8,8 @@ set -euo pipefail
 cd /project/peilab/wengzhenglang/momask-codes
 source /cm/shared/apps/Anaconda3/2023.09-0/etc/profile.d/conda.sh
 
-MOTION=${MOTION:?Pass a G1 .csv or 35-D .npy trajectory with MOTION=...}
-VQ_NAME=${VQ_NAME:-bones_g1_rvq_nq6}
+MOTION=${MOTION:?Pass a G1 .csv or 38-D .npy trajectory with MOTION=...}
+VQ_NAME=${VQ_NAME:-bones_g1_rvq_rot6d_nq6}
 CHECKPOINT=${CHECKPOINT:-latest}
 DEVICE=${DEVICE:-cuda:0}
 OUTPUT_ROOT=${OUTPUT_ROOT:-generation/rvq_reconstruction}

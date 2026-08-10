@@ -96,11 +96,11 @@ if __name__ == "__main__":
         dataset_opt_path = pjoin(opt.save_root, 'opt.txt')
         wrapper_opt_path = './checkpoints/t2m/Comp_v6_KLD005/opt.txt'
     elif opt.dataset_name == "bones_g1":
-        opt.data_root = './dataset/BONES-G1/'
+        opt.data_root = opt.g1_data_root
         opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
         opt.text_dir = pjoin(opt.data_root, 'texts')
         opt.joints_num = 0
-        dim_pose = 35
+        dim_pose = 38
         fps = 20
         radius = 0
         kinematic_chain = None

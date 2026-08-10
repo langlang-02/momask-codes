@@ -18,7 +18,7 @@ conda activate g1-mujoco
 
 export MUJOCO_GL=egl
 
-MOTION=${MOTION:?Pass a .csv or 35-D .npy trajectory with --export=ALL,MOTION=...}
+MOTION=${MOTION:?Pass a .csv or 38-D .npy trajectory with --export=ALL,MOTION=...}
 MJCF=${MJCF:-../unitree_mujoco/unitree_robots/g1/scene_29dof.xml}
 OUTPUT_MP4=${OUTPUT_MP4:-g1_visualize/output/g1_replay.mp4}
 ROOT_EULER_ORDER=${ROOT_EULER_ORDER:-xyz}

@@ -24,12 +24,13 @@ if str(PREPARE_DIR) not in sys.path:
 from g1_io import (  # noqa: E402
     G1_FEATURE_COLUMNS,
     G1_FEATURE_DIM,
+    G1_JOINT_SLICE,
     csv_values_to_model_features,
     read_g1_csv,
 )
 
 
-JOINT_START = 6
+JOINT_START = G1_JOINT_SLICE.start
 JOINT_NAMES = G1_FEATURE_COLUMNS[JOINT_START:]
 
 
@@ -90,8 +91,8 @@ def plot_joint_angle_comparison(
 ) -> tuple[Path, Path]:
     """Save a 29-DoF angle comparison image and per-joint error table.
 
-    Inputs use model units: root position in meters and all angle channels in
-    radians. Only the 29 G1 DoF channels are shown and reported in degrees.
+    Inputs use model units: root position in meters, root orientation in 6-D,
+    and 29 hinge-joint angles in radians. Only the hinge joints are reported.
     """
     if fps <= 0:
         raise ValueError("fps must be positive")
@@ -161,7 +162,7 @@ def plot_joint_angle_batch(
     ground_truth = np.asarray(ground_truth)
     prediction = np.asarray(prediction)
     if ground_truth.ndim != 3 or prediction.ndim != 3:
-        raise ValueError("Batched trajectories must have shape (batch, frames, 35).")
+        raise ValueError(f"Batched trajectories must have shape (batch, frames, {G1_FEATURE_DIM}).")
     sample_count = min(len(ground_truth), len(prediction))
     return [
         plot_joint_angle_comparison(

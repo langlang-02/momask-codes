@@ -15,6 +15,8 @@ class BaseOptions():
         self.parser.add_argument("--gpu_id", type=int, default=-1, help='GPU id')
         self.parser.add_argument('--dataset_name', type=str, default='t2m', help='Dataset Name, {t2m} for humanml3d, {kit} for kit-ml')
         self.parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here.')
+        self.parser.add_argument('--g1_data_root', type=str, default='./dataset/BONES-G1-rot6d',
+                                 help='Converted native G1 dataset with root 6-D rotation features.')
 
         self.parser.add_argument('--latent_dim', type=int, default=384, help='Dimension of transformer latent.')
         self.parser.add_argument('--n_heads', type=int, default=6, help='Number of heads.')

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reconstruct a native 35-D G1 trajectory with a trained MoMask RVQ model."""
+"""Reconstruct a native 38-D G1 trajectory with a trained MoMask RVQ model."""
 
 from __future__ import annotations
 
@@ -33,10 +33,10 @@ from utils.get_opt import get_opt  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Reconstruct a BONES-SEED G1 CSV or a 35-D MoMask NPY with a trained RVQ model."
+        description="Reconstruct a BONES-SEED G1 CSV or a 38-D MoMask NPY with a trained RVQ model."
     )
-    parser.add_argument("--motion", type=Path, required=True, help="Input G1 .csv or 35-D model-space .npy.")
-    parser.add_argument("--vq_name", default="bones_g1_rvq_nq6", help="RVQ experiment name.")
+    parser.add_argument("--motion", type=Path, required=True, help="Input G1 .csv or 38-D model-space .npy.")
+    parser.add_argument("--vq_name", default="bones_g1_rvq_rot6d_nq6", help="RVQ experiment name.")
     parser.add_argument("--checkpoints_dir", type=Path, default=Path("checkpoints"))
     parser.add_argument(
         "--checkpoint",
@@ -207,7 +207,7 @@ def main() -> None:
     mean = np.load(experiment_dir / "meta" / "mean.npy").astype(np.float32)
     std = np.load(experiment_dir / "meta" / "std.npy").astype(np.float32)
     if mean.shape != (G1_FEATURE_DIM,) or std.shape != (G1_FEATURE_DIM,):
-        raise ValueError("RVQ normalization metadata does not match the 35-D G1 representation")
+        raise ValueError("RVQ normalization metadata does not match the 38-D G1 representation")
 
     unit_length = vq_opt.stride_t ** vq_opt.down_t
     padded_features, original_length = pad_to_unit_length(features, unit_length)

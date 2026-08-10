@@ -133,7 +133,7 @@ python dataset/bones-seed_prepare/g1_to_momask.py \
   --rebuild-stats
 ```
 
-该转换按官方 120 FPS CSV 每隔 6 帧取样，输出 20 FPS 的最多 196 帧动作窗口。输出目录仍使用 `new_joint_vecs/` 这个历史目录名以复用 MoMask 数据加载器，但其中 `.npy` 的 shape 为 `(frames, 35)`，不是 HumanML3D 的 263 维特征。
+该转换按官方 120 FPS CSV 每隔 6 帧取样，输出 20 FPS 的最多 196 帧动作窗口。输出目录仍使用 `new_joint_vecs/` 这个历史目录名以复用 MoMask 数据加载器，但其中 `.npy` 的 shape 为 `(frames, 38)`：根平移 3 维（米）、连续 6D 根旋转和 29 个单自由度关节角（弧度），不是 HumanML3D 的 263 维特征。默认写入 `dataset/BONES-G1-rot6d/`，以保留旧的 35 维 Euler 数据集。
 
 ### RVQ 关节角可视化
 
@@ -146,7 +146,7 @@ python dataset/bones-seed_prepare/g1_to_momask.py \
 
 ```bash
 python visualization/plot_g1_joint_angles.py \
-  --ground_truth dataset/BONES-G1/new_joint_vecs/<sample>.npy \
+  --ground_truth dataset/BONES-G1-rot6d/new_joint_vecs/<sample>.npy \
   --prediction generation/<ext>/motions/<sample>.npy \
   --output_dir generation/<ext>/joint_angle_plots \
   --fps 20 --prediction_label "Generated"

@@ -50,6 +50,8 @@ def arg_parse(is_train=False):
     parser.add_argument('--name', type=str, default="test", help='Name of this trial')
     parser.add_argument('--is_continue', action="store_true", help='Name of this trial')
     parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here')
+    parser.add_argument('--g1_data_root', type=str, default='./dataset/BONES-G1-rot6d',
+                        help='Converted native G1 dataset with root 6-D rotation features')
     parser.add_argument('--log_every', default=10, type=int, help='iter log frequency')
     parser.add_argument('--save_latest', default=500, type=int, help='iter save latest model frequency')
     parser.add_argument('--save_every_e', default=2, type=int, help='save model every n epoch')

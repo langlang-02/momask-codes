@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bones-root", type=Path, default=Path("bones-seed"))
     parser.add_argument("--metadata", type=Path, default=Path("bones-seed/metadata/seed_metadata_v004.csv"))
     parser.add_argument("--temporal-labels", type=Path, default=None)
-    parser.add_argument("--output-root", type=Path, default=Path("dataset/BONES-G1"))
+    parser.add_argument("--output-root", type=Path, default=Path("dataset/BONES-G1-rot6d"))
     parser.add_argument("--source-fps", type=float, default=120.0)
     parser.add_argument("--target-fps", type=float, default=20.0)
     parser.add_argument(
@@ -268,9 +268,13 @@ def main() -> None:
     write_split_files(output_root, sorted(set(written_ids)), args.seed, args.val_ratio, args.test_ratio)
 
     dataset_info = {
-        "format": "bones_seed_g1_native_v1",
+        "format": "bones_seed_g1_root_rot6d_v2",
         "feature_dim": G1_FEATURE_DIM,
-        "feature_units": {"root_translation": "meters", "root_rotation_and_joints": "radians"},
+        "feature_units": {
+            "root_translation": "meters",
+            "root_rotation": "continuous_6d",
+            "joint_angles": "radians",
+        },
         "source_fps": args.source_fps,
         "target_fps": args.target_fps,
         "root_position_scale": args.root_position_scale,

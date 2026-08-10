@@ -27,8 +27,11 @@ if str(PREPARE_DIR) not in sys.path:
 from g1_io import (  # noqa: E402
     G1_FEATURE_COLUMNS,
     G1_FEATURE_DIM,
+    G1_JOINT_SLICE,
+    G1_ROOT_ROTATION_SLICE,
     csv_values_to_model_features,
     read_g1_csv,
+    rotation_6d_to_matrix,
 )
 
 
@@ -45,7 +48,7 @@ JOINT_NAMES = tuple(column.removesuffix("_dof") for column in G1_FEATURE_COLUMNS
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Kinematic MuJoCo replay for 35-D native Unitree G1 trajectories."
+        description="Kinematic MuJoCo replay for 38-D native Unitree G1 trajectories."
     )
     parser.add_argument(
         "--motion",
@@ -75,7 +78,7 @@ def parse_args() -> argparse.Namespace:
         "--root_euler_order",
         type=str,
         default="xyz",
-        help="SciPy Euler convention for root_rotateX/Y/Z; lower-case is extrinsic, upper-case intrinsic.",
+        help="CSV root_rotateX/Y/Z convention; lower-case is extrinsic, upper-case intrinsic.",
     )
     parser.add_argument(
         "--output_mp4",
@@ -123,13 +126,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_motion(path: Path) -> tuple[np.ndarray, float]:
+def load_motion(path: Path, root_euler_order: str = "xyz") -> tuple[np.ndarray, float]:
     if not path.is_file():
         raise FileNotFoundError(f"Motion file not found: {path}")
 
     suffix = path.suffix.lower()
     if suffix == ".csv":
-        return csv_values_to_model_features(read_g1_csv(path)), 120.0
+        return csv_values_to_model_features(read_g1_csv(path), root_euler_order=root_euler_order), 120.0
     if suffix == ".npy":
         features = np.load(path).astype(np.float32)
         if features.ndim != 2 or features.shape[1] != G1_FEATURE_DIM:
@@ -168,7 +171,6 @@ def frame_to_qpos(
     frame: np.ndarray,
     root_qposadr: int,
     joint_qposadrs: np.ndarray,
-    euler_order: str,
     clip_joint_limits: bool,
     frame_index: int,
     fps: float,
@@ -178,11 +180,11 @@ def frame_to_qpos(
     data.ctrl[:] = 0
     data.time = frame_index / fps
 
-    quaternion_xyzw = Rotation.from_euler(euler_order, frame[3:6]).as_quat()
+    quaternion_xyzw = Rotation.from_matrix(rotation_6d_to_matrix(frame[G1_ROOT_ROTATION_SLICE])).as_quat()
     data.qpos[root_qposadr : root_qposadr + 3] = frame[:3]
     data.qpos[root_qposadr + 3 : root_qposadr + 7] = quaternion_xyzw[[3, 0, 1, 2]]
 
-    joint_values = frame[6:].copy()
+    joint_values = frame[G1_JOINT_SLICE].copy()
     if clip_joint_limits:
         for index, qposadr in enumerate(joint_qposadrs):
             joint_id = np.flatnonzero(model.jnt_qposadr == qposadr)[0]
@@ -247,7 +249,6 @@ def replay_in_viewer(
                     features[frame_index],
                     root_qposadr,
                     joint_qposadrs,
-                    args.root_euler_order,
                     args.clip_joint_limits,
                     frame_index,
                     input_fps,
@@ -303,7 +304,6 @@ def render_video(
                     frame,
                     root_qposadr,
                     joint_qposadrs,
-                    args.root_euler_order,
                     args.clip_joint_limits,
                     frame_index,
                     input_fps,
@@ -326,7 +326,7 @@ def render_video(
 
 def main() -> None:
     args = parse_args()
-    features, default_fps = load_motion(args.motion)
+    features, default_fps = load_motion(args.motion, args.root_euler_order)
     input_fps = args.input_fps or default_fps
     playback_fps = args.playback_fps or input_fps
     if input_fps <= 0 or playback_fps <= 0:
@@ -348,7 +348,6 @@ def main() -> None:
         features[0],
         root_qposadr,
         joint_qposadrs,
-        args.root_euler_order,
         args.clip_joint_limits,
         0,
         input_fps,

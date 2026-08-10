@@ -15,8 +15,9 @@ cd /project/peilab/wengzhenglang/momask-codes
 source /cm/shared/apps/Anaconda3/2023.09-0/etc/profile.d/conda.sh
 conda activate momask-h800
 
-MASK_NAME=${MASK_NAME:-bones_g1_mtrans}
-RES_NAME=${RES_NAME:-bones_g1_res}
+MASK_NAME=${MASK_NAME:-bones_g1_mtrans_rot6d}
+RES_NAME=${RES_NAME:-bones_g1_res_rot6d}
+G1_DATA_ROOT=${G1_DATA_ROOT:-dataset/BONES-G1-rot6d}
 TEXT_PROMPT=${TEXT_PROMPT:-A person is walking forward.}
 MOTION_LENGTH=${MOTION_LENGTH:-120}
 OUTPUT_FPS=${OUTPUT_FPS:-120}
@@ -37,6 +38,7 @@ mkdir -p "$RUN_DIR"
   printf 'requested_motion_length_20hz: %s\n' "$MOTION_LENGTH"
   printf 'mask_transformer: %s\n' "$MASK_NAME"
   printf 'residual_transformer: %s\n' "$RES_NAME"
+  printf 'g1_data_root: %s\n' "$G1_DATA_ROOT"
   printf 'requested_output_fps: %s\n' "$OUTPUT_FPS"
   printf 'run_timestamp: %s\n' "$RUN_TIMESTAMP"
 } > "$RUN_DIR/generation_info.txt"
@@ -45,6 +47,7 @@ python gen_g1.py \
   --dataset_name bones_g1 \
   --name "$MASK_NAME" \
   --res_name "$RES_NAME" \
+  --g1_data_root "$G1_DATA_ROOT" \
   --gpu_id 0 \
   --ext "$EXT" \
   --text_prompt "$TEXT_PROMPT" \

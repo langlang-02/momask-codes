@@ -44,8 +44,6 @@ class EvalG1Options(EvalT2MOptions):
     def initialize(self):
         super().initialize()
         self.parser.set_defaults(which_epoch='net_best_val')
-        self.parser.add_argument('--g1_data_root', type=str, default='./dataset/BONES-G1',
-                                 help='Converted native G1 dataset directory.')
         self.parser.add_argument('--model_fps', type=float, default=20.0,
                                  help='Frame rate used while training the G1 model.')
         self.parser.add_argument('--output_fps', type=float, default=120.0,

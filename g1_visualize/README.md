@@ -1,6 +1,6 @@
 # G1 MuJoCo kinematic replay
 
-`replay_g1.py` visualizes native 35-D G1 trajectories with the 29-DoF Unitree
+`replay_g1.py` visualizes native 38-D G1 trajectories with the 29-DoF Unitree
 MuJoCo model. It is a kinematic replay tool: it writes base and joint `qpos`
 directly, calls `mujoco.mj_forward`, and never calls `mj_step`. The scene floor
 is therefore visual only and cannot alter the reconstructed motion.
@@ -27,23 +27,23 @@ located elsewhere.
 
 ## Interactive replay
 
-MoMask `.npy` files use metres/radians and default to 20 Hz:
+MoMask `.npy` files use 38-D features (root translation in metres, root 6-D
+rotation, and 29 joint angles in radians) and default to 20 Hz:
 
 ```bash
 python g1_visualize/replay_g1.py \
   --motion generation/g1_walk/motions/sample000_repeat00_len120.npy
 ```
 
-Generated or source G1 CSVs use centimetres/degrees and default to 120 Hz:
+Generated or source G1 CSVs retain BONES-SEED centimetres/degrees and default to 120 Hz:
 
 ```bash
 python g1_visualize/replay_g1.py \
   --motion generation/g1_walk/g1_csv/sample000_repeat00_len120.csv
 ```
 
-Use `--loop` to repeat the motion. `--root_euler_order xyz` is the default
-interpretation of `root_rotateX/Y/Z`; change it only if comparison with the
-source animation shows a root-orientation convention mismatch.
+Use `--loop` to repeat the motion. `--root_euler_order xyz` controls only how
+CSV `root_rotateX/Y/Z` values are converted into the model's 6-D root rotation.
 
 ## Headless MP4 rendering
 
@@ -86,7 +86,7 @@ time-named directory under `generation/g1_t2m/`, including
 
 ```bash
 TEXT_PROMPT='A person slowly walks backward and turns to the left side.' \
-sbatch --export=ALL,MASK_NAME=bones_g1_mtrans,RES_NAME=bones_g1_res,MOTION_LENGTH=64 \
+sbatch --export=ALL,MASK_NAME=bones_g1_mtrans_rot6d,RES_NAME=bones_g1_res_rot6d,MOTION_LENGTH=64 \
   slurm/generate_bones_g1.sbatch
 ```
 
@@ -101,8 +101,8 @@ source /cm/shared/apps/Anaconda3/2023.09-0/etc/profile.d/conda.sh
 conda activate momask-h800
 
 python g1_visualize/reconstruct_g1_rvq.py \
-  --motion dataset/BONES-G1/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy \
-  --vq_name bones_g1_rvq_nq6 \
+  --motion dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy \
+  --vq_name bones_g1_rvq_rot6d_nq6 \
   --checkpoint latest \
   --device cpu
 ```
@@ -133,7 +133,7 @@ and `reconstruction.mp4` are written beside each other.
 ```bash
 srun --account=peilab --partition=normal --nodes=1 --ntasks=1 \
   --cpus-per-task=4 --gpus=1 --time=00:20:00 \
-  --export=ALL,MOTION=dataset/BONES-G1/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,VQ_NAME=bones_g1_rvq_nq6,CHECKPOINT=latest \
+  --export=ALL,MOTION=dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,VQ_NAME=bones_g1_rvq_rot6d_nq6,CHECKPOINT=latest \
   bash g1_visualize/reconstruct_g1_srun.sh
 ```
 
@@ -148,6 +148,6 @@ a window or rendering:
 
 ```bash
 python g1_visualize/replay_g1.py \
-  --motion dataset/BONES-G1/new_joint_vecs/<sample>.npy \
+  --motion dataset/BONES-G1-rot6d/new_joint_vecs/<sample>.npy \
   --dry_run
 ```

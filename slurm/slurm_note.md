@@ -127,7 +127,7 @@ tensorboard --logdir log --host 0.0.0.0 --port 6006
 
 ## 6. G1 原生控制序列
 
-G1 流程使用 `dataset_name=bones_g1` 和 `dataset/BONES-G1/`。每帧是 35 维原生控制值：根平移 3 维（米）、根旋转 3 维（弧度）和 29 个 DoF（弧度）。它不会使用 HumanML3D 的 FID、R-precision 或人形 MP4 评估；RVQ、Mask Transformer 和 Residual Transformer 分别按验证重建损失、token 交叉熵保存 `net_best_val.tar`。
+G1 流程使用 `dataset_name=bones_g1` 和 `dataset/BONES-G1-rot6d/`。每帧是 38 维原生控制值：根平移 3 维（米）、连续 6D 根旋转和 29 个单自由度关节角（弧度）。它不会使用 HumanML3D 的 FID、R-precision 或人形 MP4 评估；RVQ、Mask Transformer 和 Residual Transformer 分别按验证重建损失、token 交叉熵保存 `net_best_val.tar`。
 
 转换 G1 CSV：
 
@@ -140,9 +140,9 @@ sbatch --export=ALL,LIMIT=0,OVERWRITE=0,REBUILD_STATS=1 slurm/convert_bones_g1.s
 三阶段训练：
 
 ```bash
-sbatch --export=ALL,NAME=bones_g1_rvq_nq6,BATCH_SIZE=256,MAX_EPOCH=500,NUM_QUANTIZERS=6 slurm/train_bones_g1_vq.sbatch
-sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_mtrans,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_mtrans.sbatch
-sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_res,VQ_NAME=bones_g1_rvq_nq6,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_res.sbatch
+sbatch --export=ALL,NAME=bones_g1_rvq_rot6d_nq6,IS_CONTINUE=0,BATCH_SIZE=256,MAX_EPOCH=500,NUM_QUANTIZERS=6 slurm/train_bones_g1_vq.sbatch
+sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_mtrans_rot6d,VQ_NAME=bones_g1_rvq_rot6d_nq6,IS_CONTINUE=0,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_mtrans.sbatch
+sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_res_rot6d,VQ_NAME=bones_g1_rvq_rot6d_nq6,IS_CONTINUE=0,BATCH_SIZE=64,MAX_EPOCH=500 slurm/train_bones_g1_res.sbatch
 ```
 
 `VQ_NAME` 必须匹配 G1 RVQ 实验名。若作业超时，给相同脚本追加 `IS_CONTINUE=1` 会从 `latest.tar` 继续。Mask 与 Residual 可在 RVQ 完成后并行训练，因为 Residual 训练用真值 RVQ token，不依赖已训练的 Mask Transformer。
@@ -152,7 +152,7 @@ G1 RVQ 会每 10 个 epoch 在 `checkpoints/bones_g1/<name>/g1_visualization/E##
 生成 G1 CSV：
 
 ```bash
-sbatch --export=ALL,MASK_NAME=bones_g1_mtrans,RES_NAME=bones_g1_res,TEXT_PROMPT="A person is walking forward.",MOTION_LENGTH=120,EXT=g1_walk slurm/generate_bones_g1.sbatch
+TEXT_PROMPT="A person is walking forward." sbatch --export=ALL,MASK_NAME=bones_g1_mtrans_rot6d,RES_NAME=bones_g1_res_rot6d,MOTION_LENGTH=120 slurm/generate_bones_g1.sbatch
 ```
 
 输出位于 `generation/<EXT>/motions/`（20 FPS、米/弧度 `.npy`）和 `generation/<EXT>/g1_csv/`（默认上采样为 120 FPS 的 MuJoCo-compatible CSV）。生成值默认截断到训练数据观察范围；这只能避免明显越界，部署到真实 G1 前仍须经过关节限位、速度/加速度限位、平衡与碰撞安全控制。
@@ -160,32 +160,32 @@ sbatch --export=ALL,MASK_NAME=bones_g1_mtrans,RES_NAME=bones_g1_res,TEXT_PROMPT=
 
 
 训练rvq
-sbatch --export=ALL,NAME=bones_g1_rvq_nq6,G1_VIS_EVERY_E=10,G1_VIS_SAMPLES=2 slurm/train_bones_g1_vq.sbatch
+sbatch --export=ALL,NAME=bones_g1_rvq_rot6d_nq6,G1_VIS_EVERY_E=10,G1_VIS_SAMPLES=2 slurm/train_bones_g1_vq.sbatch
 
 训练mtrans
-sbatch --export=ALL,NAME=bones_g1_mtrans,VQ_NAME=bones_g1_rvq_nq6,IS_CONTINUE=0 slurm/train_bones_g1_mtrans.sbatch
+sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_mtrans_rot6d,VQ_NAME=bones_g1_rvq_rot6d_nq6,IS_CONTINUE=0 slurm/train_bones_g1_mtrans.sbatch
 第一次启动时设置is_continue=0,否则会找不到之前的训练结果而报错
 
---dependency=afterok:483792 --export  #一定要加在export前
+--dependency=afterok:<RVQ_JOBID> --export  #一定要加在export前
 
 
 训练res-trans
-sbatch --export=ALL,NAME=bones_g1_res,VQ_NAME=bones_g1_rvq_nq6,IS_CONTINUE=0 slurm/train_bones_g1_res.sbatch
+sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_res_rot6d,VQ_NAME=bones_g1_rvq_rot6d_nq6,IS_CONTINUE=0 slurm/train_bones_g1_res.sbatch
 
 
 
 g1动作渲染:
-sbatch --export=ALL,MOTION=dataset/BONES-G1/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,OUTPUT_MP4=generation/g1_replay.mp4 g1_visualize/render_g1.sbatch
+sbatch --export=ALL,MOTION=dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,OUTPUT_MP4=generation/g1_replay.mp4 g1_visualize/render_g1.sbatch
 
 读取最新的rvq checkpoint，渲染重建效果
 srun --account=peilab --partition=normal --nodes=1 --ntasks=1 --cpus-per-task=4 --gpus=1 --time=00:20:00 \
-  --export=ALL,MOTION=dataset/BONES-G1/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,VQ_NAME=bones_g1_rvq_nq6,CHECKPOINT=latest bash g1_visualize/reconstruct_g1_srun.sh
+  --export=ALL,MOTION=dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,VQ_NAME=bones_g1_rvq_rot6d_nq6,CHECKPOINT=latest bash g1_visualize/reconstruct_g1_srun.sh
 
 
 按原始csv重建
 srun --account=peilab --partition=normal --nodes=1 --ntasks=1 \
     --cpus-per-task=4 --gpus=1 --time=00:20:00 \
-    --export=ALL,MOTION=bones-seed/g1/csv/230227/come_down_50cm_box_R_002__A219_M.csv,VQ_NAME=bones_g1_rvq_nq6,CHECKPOINT=latest \
+    --export=ALL,MOTION=bones-seed/g1/csv/230227/come_down_50cm_box_R_002__A219_M.csv,VQ_NAME=bones_g1_rvq_rot6d_nq6,CHECKPOINT=latest \
     bash g1_visualize/reconstruct_g1_srun.sh
 
 
@@ -197,9 +197,10 @@ bones-seed/g1/csv/230301/body_check_001__A230.csv
 验证t2m生成效果
 
 
-TEXT_PROMPT='A person rotates the door knob with their right hand.' \
-  sbatch --export=ALL,MASK_NAME=bones_g1_mtrans,RES_NAME=bones_g1_res,MOTION_LENGTH=64 \
+TEXT_PROMPT='A person brushes off dust from their right shoulder with the left arm.' \
+  sbatch --export=ALL,MASK_NAME=bones_g1_mtrans_rot6d,RES_NAME=bones_g1_res_rot6d,MOTION_LENGTH=64 \
     slurm/generate_bones_g1.sbatch
+    
 
 
 可测试的、贴近验证集的 prompt：
