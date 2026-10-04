@@ -25,20 +25,25 @@ from g1_io import (  # noqa: E402
     G1_FEATURE_COLUMNS,
     G1_FEATURE_DIM,
     G1_JOINT_SLICE,
+    G1_MIXED_ROOT_FEATURE_DIM,
     csv_values_to_model_features,
+    mixed_root_features_to_model_features,
     read_g1_csv,
 )
 
 
 JOINT_START = G1_JOINT_SLICE.start
-JOINT_NAMES = G1_FEATURE_COLUMNS[JOINT_START:]
+JOINT_NAMES = G1_FEATURE_COLUMNS[6:]
 
 
 def validate_features(features: np.ndarray, source: str) -> np.ndarray:
     features = np.asarray(features, dtype=np.float32)
+    if features.ndim == 2 and features.shape[1] == G1_MIXED_ROOT_FEATURE_DIM:
+        features = mixed_root_features_to_model_features(features)
     if features.ndim != 2 or features.shape[1] != G1_FEATURE_DIM:
         raise ValueError(
-            f"{source} must have shape (frames, {G1_FEATURE_DIM}), got {features.shape}."
+            f"{source} must have shape (frames, {G1_FEATURE_DIM}) or "
+            f"(frames, {G1_MIXED_ROOT_FEATURE_DIM}), got {features.shape}."
         )
     if len(features) == 0 or not np.isfinite(features).all():
         raise ValueError(f"{source} is empty or contains non-finite values.")
@@ -162,7 +167,10 @@ def plot_joint_angle_batch(
     ground_truth = np.asarray(ground_truth)
     prediction = np.asarray(prediction)
     if ground_truth.ndim != 3 or prediction.ndim != 3:
-        raise ValueError(f"Batched trajectories must have shape (batch, frames, {G1_FEATURE_DIM}).")
+        raise ValueError(
+            f"Batched trajectories must have shape (batch, frames, {G1_FEATURE_DIM}) "
+            f"or (batch, frames, {G1_MIXED_ROOT_FEATURE_DIM})."
+        )
     sample_count = min(len(ground_truth), len(prediction))
     return [
         plot_joint_angle_comparison(

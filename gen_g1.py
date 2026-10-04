@@ -16,13 +16,22 @@ from models.vq.model import RVQVAE
 from options.eval_option import EvalG1Options
 from utils.fixseed import fixseed
 from utils.get_opt import get_opt
+from utils.g1_feature_config import load_g1_dataset_info
+from utils.transformer_training import file_sha256, check_resume_binding
 
 
 PREPARE_DIR = Path(__file__).resolve().parent / "dataset" / "bones-seed_prepare"
 if str(PREPARE_DIR) not in sys.path:
     sys.path.insert(0, str(PREPARE_DIR))
 
-from g1_io import G1_FEATURE_DIM, resample_features, write_g1_csv
+from g1_io import (
+    G1_FEATURE_DIM,
+    G1_MIXED_ROOT_FEATURE_DIM,
+    mixed_root_features_to_model_features,
+    resample_features,
+    write_g1_csv,
+    local_features_to_model_features,
+)
 
 
 CLIP_VERSION = "ViT-B/32"
@@ -39,10 +48,10 @@ def checkpoint_path(model_dir: Path, requested: str, fallbacks: tuple[str, ...])
     raise FileNotFoundError(f"No checkpoint found in {model_dir}; tried: {choices}")
 
 
-def load_vq_model(vq_opt, device: torch.device) -> RVQVAE:
+def load_vq_model(vq_opt, device: torch.device, requested='net_best_val', binding=None) -> RVQVAE:
     vq_model = RVQVAE(
         vq_opt,
-        G1_FEATURE_DIM,
+        vq_opt.dim_pose,
         vq_opt.nb_code,
         vq_opt.code_dim,
         vq_opt.output_emb_width,
@@ -55,10 +64,13 @@ def load_vq_model(vq_opt, device: torch.device) -> RVQVAE:
         vq_opt.vq_norm,
     )
     model_dir = Path(vq_opt.checkpoints_dir) / vq_opt.dataset_name / vq_opt.name / "model"
-    path = checkpoint_path(model_dir, "net_best_val", ("net_best_fid.tar", "latest.tar"))
+    path = checkpoint_path(model_dir, requested, () if binding else ("net_best_fid.tar", "latest.tar"))
+    if binding and file_sha256(path) != binding['sha256']:
+        raise ValueError('RVQ checkpoint differs from Transformer training binding')
     checkpoint = torch.load(path, map_location=device)
     model_key = "vq_model" if "vq_model" in checkpoint else "net"
     vq_model.load_state_dict(checkpoint[model_key])
+    vq_model.generation_checkpoint = dict(path=str(path), epoch=int(checkpoint['ep']), sha256=file_sha256(path))
     print(f"Loading G1 RVQ model from {path}")
     return vq_model
 
@@ -80,11 +92,13 @@ def load_mask_transformer(model_opt, device: torch.device, requested: str) -> Ma
     model_dir = Path(model_opt.checkpoints_dir) / model_opt.dataset_name / model_opt.name / "model"
     path = checkpoint_path(model_dir, requested, ("net_best_val.tar", "net_best_acc.tar", "latest.tar"))
     checkpoint = torch.load(path, map_location=device)
+    check_resume_binding(checkpoint, getattr(model_opt, 'training_binding', None))
     state_key = "t2m_transformer" if "t2m_transformer" in checkpoint else "trans"
     missing, unexpected = transformer.load_state_dict(checkpoint[state_key], strict=False)
     if unexpected or any(not key.startswith("clip_model.") for key in missing):
         raise RuntimeError(f"Unexpected Mask Transformer checkpoint keys: missing={missing}, unexpected={unexpected}")
     print(f"Loading G1 Mask Transformer from {path}")
+    transformer.generation_checkpoint = dict(path=str(path), epoch=int(checkpoint['ep']), sha256=file_sha256(path))
     return transformer
 
 
@@ -109,10 +123,12 @@ def load_residual_transformer(res_opt, vq_opt, device: torch.device, requested: 
     model_dir = Path(res_opt.checkpoints_dir) / res_opt.dataset_name / res_opt.name / "model"
     path = checkpoint_path(model_dir, requested, ("net_best_val.tar", "net_best_loss.tar", "latest.tar"))
     checkpoint = torch.load(path, map_location=device)
+    check_resume_binding(checkpoint, getattr(res_opt, 'training_binding', None))
     missing, unexpected = transformer.load_state_dict(checkpoint["res_transformer"], strict=False)
     if unexpected or any(not key.startswith("clip_model.") for key in missing):
         raise RuntimeError(f"Unexpected Residual Transformer checkpoint keys: missing={missing}, unexpected={unexpected}")
     print(f"Loading G1 Residual Transformer from {path}")
+    transformer.generation_checkpoint = dict(path=str(path), epoch=int(checkpoint['ep']), sha256=file_sha256(path))
     return transformer
 
 
@@ -147,14 +163,37 @@ def read_prompts(text_prompt: str, text_path: str, motion_length: int) -> tuple[
     return prompts, lengths
 
 
-def load_dataset_info(data_root: Path, default_model_fps: float, default_scale: float) -> tuple[float, float]:
-    info_path = data_root / "dataset_info.json"
-    if not info_path.exists():
-        return default_model_fps, default_scale
-    with info_path.open("r", encoding="utf-8") as f:
-        info = json.load(f)
-    return float(info.get("target_fps", default_model_fps)), float(
-        info.get("root_position_scale", default_scale)
+def load_dataset_runtime_config(data_root: Path, default_model_fps: float, default_scale: float) -> tuple[float, float, str]:
+    info = load_g1_dataset_info(data_root)
+    return (
+        float(info.get("target_fps", default_model_fps)),
+        float(info.get("root_position_scale", default_scale)),
+        str(info.get("velocity_unit", "per_frame")),
+    )
+
+
+def to_native_g1_features(features: np.ndarray, model_fps: float, velocity_unit: str, representation=None) -> np.ndarray:
+    if features.ndim != 2:
+        raise ValueError(f"Expected generated features with shape (frames, dim), got {features.shape}")
+    if representation:
+        if representation.get('extension'):
+            raise ValueError('motion_ae text generation requires an explicit initial-height policy')
+        if features.shape[1] != representation['feature_dim'] or model_fps != representation['fps']:
+            raise ValueError('Generation representation dimension/FPS mismatch')
+        return local_features_to_model_features(features, representation['fields'], np.zeros(4))
+    if features.shape[1] == G1_FEATURE_DIM:
+        return features.astype(np.float32)
+    if features.shape[1] == G1_MIXED_ROOT_FEATURE_DIM:
+        return mixed_root_features_to_model_features(
+            features,
+            root_yaw0=0.0,
+            target_fps=model_fps,
+            velocity_unit=velocity_unit,
+            use_absolute_position=True,
+        )
+    raise ValueError(
+        f"Unsupported G1 generated feature dim {features.shape[1]}; expected "
+        f"{G1_FEATURE_DIM} or {G1_MIXED_ROOT_FEATURE_DIM}."
     )
 
 
@@ -185,7 +224,25 @@ def main() -> None:
     if res_opt.vq_name != model_opt.vq_name:
         raise ValueError("Mask and Residual Transformer checkpoints reference different RVQ models")
 
-    vq_model = load_vq_model(vq_opt, device).to(device).eval()
+    for saved_opt in (model_opt, res_opt, vq_opt):
+        saved_opt.checkpoints_dir = opt.checkpoints_dir
+    binding_path = model_root / 'meta/training_binding.json'
+    binding = json.loads(binding_path.read_text()) if binding_path.exists() else None
+    representation = binding.get('representation') if binding else None
+    if binding:
+        residual_binding = json.loads((Path(opt.checkpoints_dir) / opt.dataset_name / opt.res_name / 'meta/training_binding.json').read_text())
+        if residual_binding != binding:
+            raise ValueError('Mask and Residual training bindings differ')
+        model_opt.training_binding = res_opt.training_binding = binding
+        meta = Path(opt.checkpoints_dir) / opt.dataset_name / model_opt.vq_name / 'meta'
+        if json.loads((meta / 'representation.json').read_text()) != representation:
+            raise ValueError('RVQ representation changed since Transformer training')
+        for filename in ('mean', 'std'):
+            if file_sha256(meta / f'{filename}.npy') != binding[f'{filename}_sha256']:
+                raise ValueError('RVQ normalization changed since Transformer training')
+        vq_opt.dim_pose = representation['feature_dim']
+    requested_vq = getattr(model_opt, 'vq_checkpoint', '') or 'net_best_val'
+    vq_model = load_vq_model(vq_opt, device, requested_vq, binding).to(device).eval()
     mask_transformer = load_mask_transformer(model_opt, device, opt.which_epoch).to(device).eval()
     residual_transformer = load_residual_transformer(res_opt, vq_opt, device, opt.which_epoch).to(device).eval()
 
@@ -206,19 +263,28 @@ def main() -> None:
     token_lengths = torch.tensor(motion_lengths, device=device, dtype=torch.long) // unit_length
 
     data_root = Path(opt.g1_data_root)
-    model_fps, root_position_scale = load_dataset_info(
+    model_fps, root_position_scale, velocity_unit = load_dataset_runtime_config(
         data_root, opt.model_fps, opt.root_position_scale
     )
     mean = np.load(Path(vq_opt.checkpoints_dir) / vq_opt.dataset_name / vq_opt.name / "meta" / "mean.npy")
     std = np.load(Path(vq_opt.checkpoints_dir) / vq_opt.dataset_name / vq_opt.name / "meta" / "std.npy")
-    if mean.shape != (G1_FEATURE_DIM,) or std.shape != (G1_FEATURE_DIM,):
-        raise ValueError("RVQ normalization metadata does not match the 38-D G1 representation")
+    if mean.shape != (vq_opt.dim_pose,) or std.shape != (vq_opt.dim_pose,):
+        raise ValueError(
+            f"RVQ normalization metadata has mean/std shapes {mean.shape}/{std.shape}; "
+            f"expected ({vq_opt.dim_pose},)"
+        )
 
     data_min = data_max = None
     if not opt.disable_data_range_clip:
         min_path, max_path = data_root / "Min.npy", data_root / "Max.npy"
         if min_path.exists() and max_path.exists():
             data_min, data_max = np.load(min_path), np.load(max_path)
+            if representation:
+                data_min, data_max = data_min[representation['indices']], data_max[representation['indices']]
+            if data_min.shape != (vq_opt.dim_pose,) or data_max.shape != (vq_opt.dim_pose,):
+                raise ValueError(
+                    f"G1 Min/Max shapes {data_min.shape}/{data_max.shape} do not match dim_pose={vq_opt.dim_pose}"
+                )
         else:
             print("G1 Min.npy/Max.npy not found; generated controls will not be range-clipped")
 
@@ -227,6 +293,16 @@ def main() -> None:
     csv_dir = result_root / "g1_csv"
     motion_dir.mkdir(parents=True, exist_ok=True)
     csv_dir.mkdir(parents=True, exist_ok=True)
+    write_manifest = dict(seed=opt.seed, prompts=prompts, lengths=motion_lengths,
+                          model_fps=model_fps, output_fps=opt.output_fps,
+                          repeats=opt.repeat_times, time_steps=opt.time_steps, cond_scale=opt.cond_scale,
+                          temperature=opt.temperature, topkr=opt.topkr,
+                          range_clip=not opt.disable_data_range_clip,
+                          representation=representation, initial_xy_yaw=[0, 0, 0],
+                          checkpoints=dict(rvq=vq_model.generation_checkpoint,
+                                           mask=mask_transformer.generation_checkpoint,
+                                           residual=residual_transformer.generation_checkpoint))
+    (result_root / 'generation_manifest.json').write_text(json.dumps(write_manifest, indent=2) + '\n')
 
     for repeat_index in range(opt.repeat_times):
         with torch.no_grad():
@@ -246,13 +322,17 @@ def main() -> None:
 
         generated = generated * std + mean
         for sample_index, (caption, length) in enumerate(zip(prompts, motion_lengths)):
-            controls_20hz = generated[sample_index, :length].astype(np.float32)
+            features_20hz = generated[sample_index, :length].astype(np.float32)
             if data_min is not None and data_max is not None:
-                controls_20hz = np.clip(controls_20hz, data_min, data_max)
+                features_20hz = np.clip(features_20hz, data_min, data_max)
+            controls_20hz = to_native_g1_features(features_20hz, model_fps, velocity_unit, representation)
             controls_output = resample_features(controls_20hz, model_fps, opt.output_fps)
 
             stem = f"sample{sample_index:03d}_repeat{repeat_index:02d}_len{length}"
-            np.save(motion_dir / f"{stem}.npy", controls_20hz)
+            np.save(motion_dir / f"{stem}.npy", features_20hz)
+            np.save(motion_dir / f"{stem}_tokens.npy", token_ids[sample_index, :length // unit_length].cpu().numpy())
+            if features_20hz.shape[1] != G1_FEATURE_DIM:
+                np.save(motion_dir / f"{stem}_native38.npy", controls_20hz)
             write_g1_csv(csv_dir / f"{stem}.csv", controls_output, root_position_scale)
             print(
                 f"Generated {stem}: {len(controls_20hz)} frames at {model_fps:g} FPS, "
