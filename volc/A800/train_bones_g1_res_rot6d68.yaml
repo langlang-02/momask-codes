@@ -1,0 +1,149 @@
+Name: momask-g1-res-rot6d68-latest-bs2048-a800-500ep
+Description: G1 rot6d68 res Transformer, frozen latest RVQ ep499, BS2048, 500 epochs.
+ProjectName: default
+RuntimeConfig:
+  Image:
+    Type: Prebuild
+    Url: vemlp-cn-beijing.cr.volces.com/preset-images/pytorch:2.10.0-cu12.9.1-py3.11-ubuntu22.04
+  Framework: Custom
+  Command: |-
+    set -euo pipefail
+    export MOMASK_ROOT=/root/code/momask-codes
+    export MOMASK_PYTHON="${MOMASK_ROOT}/.venv/bin/python"
+    if [ ! -f "${MOMASK_ROOT}/volc/momask_g1_train_entrypoint.sh" ]; then
+      echo "ERROR: VePFS code mount is missing: ${MOMASK_ROOT}" >&2
+      find /root/code -maxdepth 4 -mindepth 1 2>/dev/null | sort | head -200 >&2 || true
+      exit 2
+    fi
+    task_entry="/tmp/momask_g1_train_entrypoint_res_${RANDOM}_$$.sh"
+    cp "${MOMASK_ROOT}/volc/momask_g1_train_entrypoint.sh" "${task_entry}"
+    chmod +x "${task_entry}"
+    exec bash "${task_entry}" res
+  Envs:
+  - Name: MOMASK_ROOT
+    Value: /root/code/momask-codes
+    IsPrivate: false
+  - Name: MOMASK_PYTHON
+    Value: /root/code/momask-codes/.venv/bin/python
+    IsPrivate: false
+  - Name: G1_DATA_ROOT
+    Value: /root/efs/users/zhaohui.yang/dataset/BONES-G1-feature-bank-v1
+    IsPrivate: false
+  - Name: CHECKPOINTS_DIR
+    Value: /root/efs/users/zhaohui.yang/dataset/momask-checkpoints
+    IsPrivate: false
+  - Name: MOMASK_LOG_ROOT
+    Value: /root/efs/users/zhaohui.yang/dataset/momask-log
+    IsPrivate: false
+  - Name: MOMASK_HOME
+    Value: /root/efs/users/zhaohui.yang/dataset/momask-home
+    IsPrivate: false
+  - Name: VQ_NAME
+    Value: bones_g1_rvq_rot6d68_v1_nq6
+    IsPrivate: false
+  - Name: RES_BATCH_SIZE
+    Value: '2048'
+    IsPrivate: false
+  - Name: RES_MAX_EPOCH
+    Value: '500'
+    IsPrivate: false
+  - Name: IS_CONTINUE
+    Value: '0'
+    IsPrivate: false
+  - Name: DDP
+    Value: '0'
+    IsPrivate: false
+  - Name: NPROC_PER_NODE
+    Value: '1'
+    IsPrivate: false
+  - Name: CUDA_VISIBLE_DEVICES
+    Value: '0'
+    IsPrivate: false
+  - Name: OMP_NUM_THREADS
+    Value: '4'
+    IsPrivate: false
+  - Name: MKL_NUM_THREADS
+    Value: '4'
+    IsPrivate: false
+  - Name: TOKENIZERS_PARALLELISM
+    Value: 'false'
+    IsPrivate: false
+  - Name: WANDB_MODE
+    Value: offline
+    IsPrivate: false
+  - Name: PYTHONWARNINGS
+    Value: ignore
+    IsPrivate: false
+  - Name: NO_ALBUMENTATIONS_UPDATE
+    Value: '1'
+    IsPrivate: false
+  - Name: PYTORCH_CUDA_ALLOC_CONF
+    Value: expandable_segments:True
+    IsPrivate: false
+  - Name: REPRESENTATION_CONFIG
+    Value: configs/representations/g1_local_rot6d68_v1.yaml
+    IsPrivate: false
+  - Name: VQ_CHECKPOINT
+    Value: 'frozen_latest_ep0499_it8998000.tar'
+    IsPrivate: false
+  - Name: RES_NAME
+    Value: 'bones_g1_res_rot6d68_latest_ep499_bs2048_v1'
+    IsPrivate: false
+  - Name: TRANSFORMER_WARMUP_EPOCHS
+    Value: '5'
+    IsPrivate: false
+  - Name: TRANSFORMER_DECAY_EPOCHS
+    Value: '200 400'
+    IsPrivate: false
+  - Name: TRANSFORMER_SAVE_EVERY_E
+    Value: '50'
+    IsPrivate: false
+  - Name: PYTHONUNBUFFERED
+    Value: '1'
+    IsPrivate: false
+  - Name: LOG_EVERY
+    Value: '10'
+    IsPrivate: false
+ResourceConfig:
+  ResourceQueueId: q-20260706191152-scrkm
+  Roles:
+  - Name: worker
+    Replicas: 1
+    Resource:
+      Type: Flexible
+      InstanceTypeId: ''
+      FlexibleResourceClaim:
+        Cpu: 8
+        MemoryGiB: 64
+        GpuType: NVIDIA-A800-SXM4-80GB
+        Family: ml.hpcpni2l
+        GpuCount: 1
+        RdmaEniCount: 0
+      ZoneId: cn-beijing-b
+    NodeAffinitySpec: {}
+  Preemptible: false
+  Priority: 4
+  ResourceReservation: false
+  OnlyUseSuspectedNode: false
+  MaxRuntimeSeconds: 604800
+  HoldingTimeSeconds: 0
+StorageConfig:
+  Storages:
+  - Type: Vepfs
+    MountPath: /root/code/momask-codes
+    Config:
+      Vepfs:
+        Id: vepfs-cnbjf7015ef11e9c
+        SubPath: zhaohui.yang/momask-codes
+        FileSystemName: DRoboticsAILab
+        HostPath: /mnt/vepfs-cnbjf7015ef11e9c
+    ReadOnly: false
+  - Type: Efs
+    MountPath: /root/efs
+    Config:
+      Efs:
+        Id: efs-cnbjc8a589e0f6d6f
+        Addr: cnbjc8a589e0f6d6f.3psq7ep69ltkw6csxyuomq6f5.efs.ivolces.com:/
+        FileSystemName: DRoboticsAILab
+    ReadOnly: false
+ObservableConfig: {}

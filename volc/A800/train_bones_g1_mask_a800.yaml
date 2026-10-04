@@ -1,0 +1,99 @@
+TaskName: "momask-g1-mixed-root-mask-a800"
+Description: "Train MoMask text Mask Transformer on BONES-SEED G1 mixed-root RVQ tokens."
+Tags:
+  - "momask"
+  - "bones-g1"
+  - "mask-transformer"
+
+UserCodePath: ""
+RemoteMountCodePath: ""
+Entrypoint: |-
+  set -euo pipefail
+  export MOMASK_ROOT=/root/code/momask-codes
+  export MOMASK_PYTHON="${MOMASK_ROOT}/.venv/bin/python"
+  if [ ! -f "${MOMASK_ROOT}/volc/momask_g1_train_entrypoint.sh" ]; then
+    echo "ERROR: VePFS code mount is missing: ${MOMASK_ROOT}" >&2
+    find /root/code -maxdepth 4 -mindepth 1 2>/dev/null | sort | head -200 >&2 || true
+    exit 2
+  fi
+  task_entry="/tmp/momask_g1_train_entrypoint_mask_${RANDOM}_$$.sh"
+  cp "${MOMASK_ROOT}/volc/momask_g1_train_entrypoint.sh" "${task_entry}"
+  chmod +x "${task_entry}"
+  exec bash "${task_entry}" mask
+
+ImageUrl: "vemlp-cn-beijing.cr.volces.com/preset-images/pytorch:2.10.0-cu12.9.1-py3.11-ubuntu22.04"
+ResourceQueueID: "q-20260706191152-scrkm"
+Framework: "Custom"
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "ml.hpcpni2l.14xlarge"
+
+ActiveDeadlineSeconds: "120h"
+DelayExitTimeSeconds: "30m"
+EnableTensorBoard: false
+
+Envs:
+  - Name: "MOMASK_ROOT"
+    Value: "/root/code/momask-codes"
+    IsPrivate: false
+  - Name: "MOMASK_PYTHON"
+    Value: "/root/code/momask-codes/.venv/bin/python"
+    IsPrivate: false
+  - Name: "G1_DATA_ROOT"
+    Value: "/root/efs/users/zhaohui.yang/dataset/BONES-G1-mixed-root"
+    IsPrivate: false
+  - Name: "CHECKPOINTS_DIR"
+    Value: "/root/efs/users/zhaohui.yang/dataset/momask-checkpoints"
+    IsPrivate: false
+  - Name: "MOMASK_LOG_ROOT"
+    Value: "/root/efs/users/zhaohui.yang/dataset/momask-log"
+    IsPrivate: false
+  - Name: "MOMASK_HOME"
+    Value: "/root/efs/users/zhaohui.yang/dataset/momask-home"
+    IsPrivate: false
+  - Name: "VQ_NAME"
+    Value: "bones_g1_rvq_mixed_root_absxyz_nq6"
+    IsPrivate: false
+  - Name: "MASK_NAME"
+    Value: "bones_g1_mtrans_mixed_root_absxyz"
+    IsPrivate: false
+  - Name: "MASK_BATCH_SIZE"
+    Value: "64"
+    IsPrivate: false
+  - Name: "MASK_MAX_EPOCH"
+    Value: "500"
+    IsPrivate: false
+  - Name: "IS_CONTINUE"
+    Value: "0"
+    IsPrivate: false
+  - Name: "CUDA_VISIBLE_DEVICES"
+    Value: "0"
+    IsPrivate: false
+  - Name: "OMP_NUM_THREADS"
+    Value: "16"
+    IsPrivate: false
+  - Name: "PYTORCH_CUDA_ALLOC_CONF"
+    Value: "expandable_segments:True"
+    IsPrivate: false
+
+Storages:
+  - Type: "Vepfs"
+    MountPath: "/root/code/momask-codes"
+    VepfsId: "vepfs-cnbjf7015ef11e9c"
+    SubPath: "zhaohui.yang/momask-codes"
+    ReadOnly: false
+  - Type: "VolcEfs"
+    MountPath: "/root/efs"
+    ReadOnly: false
+    FsName: "DRoboticsAILab"
+    VolcEfsId: "efs-cnbjc8a589e0f6d6f"
+
+AccessType: "Queue"
+Preemptible: false
+Priority: 4
+RetryOptions:
+  EnableRetry: false
+  MaxRetryTimes: 1
+  IntervalSeconds: 120
+  PolicySets: []

@@ -1,0 +1,130 @@
+Name: "momask-g1-mixed-root-rvq-h20-ddp8"
+Description: "Train BONES-SEED G1 mixed-root+absxyz RVQ on H20 queue with single-node DDP."
+ProjectName: "default"
+RuntimeConfig:
+  Image:
+    Type: "Prebuild"
+    Url: "vemlp-cn-beijing.cr.volces.com/preset-images/pytorch:2.10.0-cu12.9.1-py3.11-ubuntu22.04"
+  Framework: "Custom"
+  Command: |-
+    set -euo pipefail
+    export MOMASK_ROOT=/root/code/momask-codes
+    export MOMASK_PYTHON="${MOMASK_ROOT}/.venv/bin/python"
+    if [ ! -f "${MOMASK_ROOT}/volc/momask_g1_train_entrypoint.sh" ]; then
+      echo "ERROR: VePFS code mount is missing: ${MOMASK_ROOT}" >&2
+      find /root/code -maxdepth 4 -mindepth 1 2>/dev/null | sort | head -200 >&2 || true
+      exit 2
+    fi
+    task_entry="/tmp/momask_g1_train_entrypoint_rvq_${RANDOM}_$$.sh"
+    cp "${MOMASK_ROOT}/volc/momask_g1_train_entrypoint.sh" "${task_entry}"
+    chmod +x "${task_entry}"
+    exec bash "${task_entry}" rvq
+  Envs:
+    - Name: "MOMASK_ROOT"
+      Value: "/root/code/momask-codes"
+      IsPrivate: false
+    - Name: "MOMASK_PYTHON"
+      Value: "/root/code/momask-codes/.venv/bin/python"
+      IsPrivate: false
+    - Name: "G1_DATA_ROOT"
+      Value: "/root/efs/users/zhaohui.yang/dataset/BONES-G1-mixed-root"
+      IsPrivate: false
+    - Name: "CHECKPOINTS_DIR"
+      Value: "/root/efs/users/zhaohui.yang/dataset/momask-checkpoints"
+      IsPrivate: false
+    - Name: "MOMASK_LOG_ROOT"
+      Value: "/root/efs/users/zhaohui.yang/dataset/momask-log"
+      IsPrivate: false
+    - Name: "MOMASK_HOME"
+      Value: "/root/efs/users/zhaohui.yang/dataset/momask-home"
+      IsPrivate: false
+    - Name: "VQ_NAME"
+      Value: "bones_g1_rvq_mixed_root_absxyz_nq6"
+      IsPrivate: false
+    - Name: "RVQ_BATCH_SIZE"
+      Value: "512"
+      IsPrivate: false
+    - Name: "RVQ_MAX_EPOCH"
+      Value: "500"
+      IsPrivate: false
+    - Name: "RVQ_NUM_QUANTIZERS"
+      Value: "6"
+      IsPrivate: false
+    - Name: "IS_CONTINUE"
+      Value: "1"
+      IsPrivate: false
+    - Name: "DDP"
+      Value: "1"
+      IsPrivate: false
+    - Name: "NPROC_PER_NODE"
+      Value: "8"
+      IsPrivate: false
+    - Name: "CUDA_VISIBLE_DEVICES"
+      Value: "0,1,2,3,4,5,6,7"
+      IsPrivate: false
+    - Name: "OMP_NUM_THREADS"
+      Value: "8"
+      IsPrivate: false
+    - Name: "MKL_NUM_THREADS"
+      Value: "8"
+      IsPrivate: false
+    - Name: "TOKENIZERS_PARALLELISM"
+      Value: "false"
+      IsPrivate: false
+    - Name: "WANDB_MODE"
+      Value: "offline"
+      IsPrivate: false
+    - Name: "PYTHONWARNINGS"
+      Value: "ignore"
+      IsPrivate: false
+    - Name: "NO_ALBUMENTATIONS_UPDATE"
+      Value: "1"
+      IsPrivate: false
+    - Name: "PYTORCH_CUDA_ALLOC_CONF"
+      Value: "expandable_segments:True"
+      IsPrivate: false
+ResourceConfig:
+  ResourceQueueId: "q-20251104161904-5jb7z"
+  Roles:
+    - Name: "worker"
+      Replicas: 1
+      Resource:
+        Type: "Flexible"
+        InstanceTypeId: ""
+        FlexibleResourceClaim:
+          Cpu: 160
+          MemoryGiB: 1600
+          GpuType: "NVIDIA-H20-SXM5-96GB"
+          Family: "ml.pni3l"
+          GpuCount: 8
+          RdmaEniCount: 0
+        ZoneId: "cn-beijing-c"
+      NodeAffinitySpec:
+        StrategyType: "User"
+        GPUCPUNodePreference: "GPURequired"
+  Preemptible: false
+  Priority: 4
+  ResourceReservation: false
+  OnlyUseSuspectedNode: false
+  MaxRuntimeSeconds: 604800
+  HoldingTimeSeconds: 0
+StorageConfig:
+  Storages:
+    - Type: "Vepfs"
+      MountPath: "/root/code/momask-codes"
+      Config:
+        Vepfs:
+          Id: "vepfs-cnbjf7015ef11e9c"
+          SubPath: "zhaohui.yang/momask-codes"
+          FileSystemName: "DRoboticsAILab"
+          HostPath: "/mnt/vepfs-cnbjf7015ef11e9c"
+      ReadOnly: false
+    - Type: "Efs"
+      MountPath: "/root/efs"
+      Config:
+        Efs:
+          Id: "efs-cnbjc8a589e0f6d6f"
+          Addr: "cnbjc8a589e0f6d6f.3psq7ep69ltkw6csxyuomq6f5.efs.ivolces.com:/"
+          FileSystemName: "DRoboticsAILab"
+      ReadOnly: false
+ObservableConfig: {}

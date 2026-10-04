@@ -175,18 +175,22 @@ sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,NAME=bones_g1_res_rot6d,VQ_
 
 
 g1动作渲染:
-sbatch --export=ALL,MOTION=dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,OUTPUT_MP4=generation/g1_replay.mp4 g1_visualize/render_g1.sbatch
+python g1_visualize/replay_g1.py \
+  --motion dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy \
+  --output_mp4 generation/g1_replay.mp4
 
 读取最新的rvq checkpoint，渲染重建效果
-srun --account=peilab --partition=normal --nodes=1 --ntasks=1 --cpus-per-task=4 --gpus=1 --time=00:20:00 \
-  --export=ALL,MOTION=dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy,VQ_NAME=bones_g1_rvq_rot6d_nq6,CHECKPOINT=latest bash g1_visualize/reconstruct_g1_srun.sh
+MOTION=dataset/BONES-G1-rot6d/new_joint_vecs/eating_apple_R_003__A235_M_seg001_win000.npy \
+VQ_NAME=bones_g1_rvq_rot6d_nq6 \
+CHECKPOINT=latest \
+bash g1_visualize/reconstruct_g1_local.sh
 
 
 按原始csv重建
-srun --account=peilab --partition=normal --nodes=1 --ntasks=1 \
-    --cpus-per-task=4 --gpus=1 --time=00:20:00 \
-    --export=ALL,MOTION=bones-seed/g1/csv/230227/come_down_50cm_box_R_002__A219_M.csv,VQ_NAME=bones_g1_rvq_rot6d_nq6,CHECKPOINT=latest \
-    bash g1_visualize/reconstruct_g1_srun.sh
+RAW_CSV=bones-seed/g1/csv/230227/come_down_50cm_box_R_002__A219_M.csv \
+VQ_NAME=bones_g1_rvq_rot6d_nq6 \
+CHECKPOINT=latest \
+bash g1_visualize/reconstruct_g1_local.sh
 
 
 bones-seed/g1/csv/230301/body_check_001__A230.csv
@@ -197,9 +201,18 @@ bones-seed/g1/csv/230301/body_check_001__A230.csv
 验证t2m生成效果
 
 
-TEXT_PROMPT='A person brushes off dust from their right shoulder with the left arm.' \
-  sbatch --export=ALL,MASK_NAME=bones_g1_mtrans_rot6d,RES_NAME=bones_g1_res_rot6d,MOTION_LENGTH=64 \
-    slurm/generate_bones_g1.sbatch
+RUN_EXT=g1_t2m/local_test
+TEXT_PROMPT='A person brushes off dust from their right shoulder with the left arm.'
+python gen_g1.py \
+  --dataset_name bones_g1 \
+  --name bones_g1_mtrans_rot6d \
+  --res_name bones_g1_res_rot6d \
+  --g1_data_root dataset/BONES-G1-rot6d \
+  --gpu_id 0 \
+  --ext "$RUN_EXT" \
+  --text_prompt "$TEXT_PROMPT" \
+  --motion_length 64 \
+  --output_fps 120
     
 
 

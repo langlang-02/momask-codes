@@ -4,6 +4,9 @@ This is a MoMask/PyTorch repository extended for BONES-SEED data, especially
 native Unitree G1 text-to-motion. Read this file before changing data formats,
 training entry points, Slurm scripts, or G1 visualization.
 
+Current default is local execution. Do not use `srun`, `sbatch`, or Slurm
+wrappers unless the user explicitly asks for cluster scripts.
+
 ## Repository Map
 
 | Area | Key files | Purpose |
@@ -85,25 +88,66 @@ The main scripts and defaults are:
 
 ```bash
 # 1. Data conversion: defaults to dataset/BONES-G1-rot6d
-sbatch slurm/convert_bones_g1.sbatch
+python dataset/bones-seed_prepare/g1_to_momask.py \
+  --bones-root bones-seed \
+  --metadata bones-seed/metadata/seed_metadata_v004.csv \
+  --temporal-labels bones-seed/metadata/seed_metadata_v002_temporal_labels.jsonl \
+  --output-root dataset/BONES-G1-rot6d \
+  --use-temporal-labels \
+  --rebuild-stats
 
-# 2. First RVQ run. Use IS_CONTINUE=1 only when latest.tar exists.
-sbatch --export=ALL,IS_CONTINUE=0 slurm/train_bones_g1_vq.sbatch
+# 2. First RVQ run. Use --is_continue only when latest.tar exists.
+python train_vq.py \
+  --dataset_name bones_g1 \
+  --name bones_g1_rvq_rot6d_nq6 \
+  --g1_data_root dataset/BONES-G1-rot6d \
+  --gpu_id 0 \
+  --batch_size 2048 \
+  --max_epoch 500 \
+  --num_quantizers 6 \
+  --window_size 64
 
-# 3. Submit both after the RVQ job has finished.
-sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,IS_CONTINUE=0 \
-  slurm/train_bones_g1_mtrans.sbatch
-sbatch --dependency=afterok:<RVQ_JOBID> --export=ALL,IS_CONTINUE=0 \
-  slurm/train_bones_g1_res.sbatch
+# 3. Run both after RVQ has finished.
+python train_t2m_transformer.py \
+  --dataset_name bones_g1 \
+  --name bones_g1_mtrans_rot6d \
+  --vq_name bones_g1_rvq_rot6d_nq6 \
+  --g1_data_root dataset/BONES-G1-rot6d \
+  --gpu_id 0 \
+  --batch_size 2048 \
+  --max_epoch 500
+python train_res_transformer.py \
+  --dataset_name bones_g1 \
+  --name bones_g1_res_rot6d \
+  --vq_name bones_g1_rvq_rot6d_nq6 \
+  --g1_data_root dataset/BONES-G1-rot6d \
+  --gpu_id 0 \
+  --batch_size 2048 \
+  --max_epoch 500 \
+  --cond_drop_prob 0.2 \
+  --share_weight
 
-# 4. One GPU job: generate then render an MP4.
-TEXT_PROMPT='A person brushes off dust from their right shoulder with the left arm.' \
-sbatch --export=ALL,MOTION_LENGTH=64 slurm/generate_bones_g1.sbatch
+# 4. Generate, then render an MP4.
+RUN_EXT=g1_t2m/local_test
+TEXT_PROMPT='A person brushes off dust from their right shoulder with the left arm.'
+python gen_g1.py \
+  --dataset_name bones_g1 \
+  --name bones_g1_mtrans_rot6d \
+  --res_name bones_g1_res_rot6d \
+  --g1_data_root dataset/BONES-G1-rot6d \
+  --gpu_id 0 \
+  --ext "$RUN_EXT" \
+  --text_prompt "$TEXT_PROMPT" \
+  --motion_length 64 \
+  --output_fps 120
+MUJOCO_GL=egl python g1_visualize/replay_g1.py \
+  --motion generation/$RUN_EXT/g1_csv/sample000_repeat00_len64.csv \
+  --output_mp4 generation/$RUN_EXT/sample000_repeat00_len64.mp4
 ```
 
-All G1 Slurm scripts accept `G1_DATA_ROOT` to override the default dataset
-location. Checkpoint experiment names can similarly be overridden through
-`NAME`, `VQ_NAME`, `MASK_NAME`, and `RES_NAME`.
+Use `--g1_data_root` to override the default dataset location. Checkpoint
+experiment names can similarly be overridden with `--name`, `--vq_name`, and
+`--res_name`.
 
 `latest.tar` is the resumable training state. Use `--is_continue`/`IS_CONTINUE=1`
 only with the same experiment and feature layout. `net_best_val.tar` is the
@@ -120,27 +164,25 @@ generating held-out English captions and inspecting MuJoCo videos.
   samples coarse Mask tokens, fills residual RVQ tokens, decodes them, clips
   values to the dataset range when available, and writes 20 Hz NPY plus 120 Hz
   CSV.
-- `slurm/generate_bones_g1.sbatch` performs generation and EGL rendering in one
-  GPU allocation. It writes each run to `generation/g1_t2m/<timestamp>/` and
-  records prompt, requested/generated length, model names, and paths in
-  `generation_info.txt`.
+- `gen_g1.py` performs text-conditioned G1 generation. Render the generated CSV
+  with `g1_visualize/replay_g1.py`.
 - `g1_visualize/replay_g1.py` is strictly kinematic: it writes `qpos` and calls
   `mujoco.mj_forward`; it never calls `mj_step`. Ground contact is visual only.
 - `g1_visualize/reconstruct_g1_rvq.py` reconstructs a raw G1 CSV or 38D NPY
   using RVQ, with retry-safe checkpoint loading. It puts the actual checkpoint
   epoch in its output directory name.
-- `g1_visualize/reconstruct_g1_srun.sh` runs reconstruction then a fixed-camera,
-  side-by-side original-vs-reconstruction MuJoCo render. Run it inside `srun`.
+- `g1_visualize/reconstruct_g1_local.sh` runs reconstruction then a fixed-camera,
+  side-by-side original-vs-reconstruction MuJoCo render locally.
 - `g1_visualize/compare_g1_reconstruction.py` is the two-panel renderer;
   `visualization/plot_g1_joint_angles.py` writes joint-angle/error plots.
 
 Example RVQ reconstruction after a 6D RVQ checkpoint exists:
 
 ```bash
-srun --account=<ACCOUNT> --partition=<GPU_PARTITION> --nodes=1 --ntasks=1 \
-  --cpus-per-task=4 --gpus=1 --time=00:20:00 \
-  --export=ALL,MOTION=<RAW_G1_CSV_OR_38D_NPY>,VQ_NAME=bones_g1_rvq_rot6d_nq6,CHECKPOINT=net_best_val \
-  bash g1_visualize/reconstruct_g1_srun.sh
+RAW_CSV=<RAW_G1_CSV> \
+VQ_NAME=bones_g1_rvq_rot6d_nq6 \
+CHECKPOINT=net_best_val \
+bash g1_visualize/reconstruct_g1_local.sh
 ```
 
 ## Moving to Another Server
@@ -160,11 +202,8 @@ The default MuJoCo XML is a sibling repository path. On another server either
 preserve that sibling layout or set `MJCF=/absolute/path/to/scene_29dof.xml` in
 the rendering/reconstruction environment.
 
-Cluster-specific values are intentionally concentrated near the top of each
-`.sbatch` file: repository `cd` path, Conda initialization path, account,
-partition, wall time, and GPU count. Update them before the first submission.
-The existing `/cm/shared/apps/Anaconda3/...` path and `peilab` account are
-HKUST-specific examples, not portable defaults.
+Historical Slurm wrappers are kept under `slurm/` for cluster runs, but local
+commands are the default in this workspace.
 
 Two environments are used:
 
@@ -188,7 +227,7 @@ Two environments are used:
   TensorBoard logs, or machine-specific paths/credentials.
 - Use `rg` to find references before changing a data layout. For a layout change,
   check converter, training entry points, `utils/get_opt.py`, generation,
-  reconstruction, visualization, Slurm defaults, and documentation together.
+  reconstruction, visualization, local wrappers, and documentation together.
 
 ## Minimum Validation Before Handoff
 
@@ -203,11 +242,8 @@ python -m py_compile dataset/bones-seed_prepare/g1_io.py \
 # Validate CSV -> 38D -> MuJoCo named-joint mapping; no window or physics step.
 python g1_visualize/replay_g1.py --motion <G1_CSV> --dry_run
 
-# Shell syntax for changed job scripts
-bash -n slurm/convert_bones_g1.sbatch slurm/train_bones_g1_vq.sbatch \
-  slurm/train_bones_g1_mtrans.sbatch slurm/train_bones_g1_res.sbatch \
-  slurm/generate_bones_g1.sbatch
+# Shell syntax for changed local wrappers
+bash -n g1_visualize/reconstruct_g1_local.sh
 ```
 
-Run actual EGL MP4 rendering only inside a GPU allocation; login nodes generally
-do not provide an EGL context.
+Run actual EGL MP4 rendering only on a machine with a working MuJoCo EGL setup.

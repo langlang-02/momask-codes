@@ -1,0 +1,102 @@
+TaskName: "momask-g1-mixed-root-rvq-h20"
+Description: "Train MoMask RVQ tokenizer on BONES-SEED G1 mixed-root 42D data."
+Tags:
+  - "momask"
+  - "bones-g1"
+  - "rvq"
+
+UserCodePath: ""
+RemoteMountCodePath: ""
+Entrypoint: |-
+  set -euo pipefail
+  for root in \
+    /root/efs/users/zhaohui.yang/momask-codes \
+    /root/efs/users/zhaohui.yang/code/momask-codes \
+    /root/code/momask-codes
+  do
+    if [ -f "${root}/volc/momask_g1_train_entrypoint.sh" ]; then
+      export MOMASK_ROOT="${root}"
+      export MOMASK_PYTHON="${root}/.venv/bin/python"
+      exec bash "${root}/volc/momask_g1_train_entrypoint.sh" rvq
+    fi
+  done
+  echo "ERROR: cannot locate momask-codes under known H20 queue mount points" >&2
+  find /root/efs -maxdepth 4 -mindepth 1 2>/dev/null | sort | head -200 >&2 || true
+  exit 2
+
+ImageUrl: "vemlp-cn-beijing.cr.volces.com/preset-images/pytorch:2.10.0-cu12.9.1-py3.11-ubuntu22.04"
+ResourceQueueID: "q-20251104161904-5jb7z"
+Framework: "Custom"
+TaskRoleSpecs:
+  - RoleName: "worker"
+    RoleReplicas: 1
+    Flavor: "custom"
+    ResourceSpec:
+      Family: "ml.pni3l"
+      CPU: 20.000
+      Memory: 200.000
+      GPUNum: 1
+
+ActiveDeadlineSeconds: "72h"
+DelayExitTimeSeconds: "30m"
+EnableTensorBoard: false
+
+Envs:
+  - Name: "MOMASK_ROOT"
+    Value: "/root/efs/users/zhaohui.yang/momask-codes"
+    IsPrivate: false
+  - Name: "MOMASK_PYTHON"
+    Value: "/root/efs/users/zhaohui.yang/momask-codes/.venv/bin/python"
+    IsPrivate: false
+  - Name: "G1_DATA_ROOT"
+    Value: "/root/efs/users/zhaohui.yang/dataset/BONES-G1-mixed-root"
+    IsPrivate: false
+  - Name: "CHECKPOINTS_DIR"
+    Value: "/root/efs/users/zhaohui.yang/dataset/momask-checkpoints"
+    IsPrivate: false
+  - Name: "MOMASK_LOG_ROOT"
+    Value: "/root/efs/users/zhaohui.yang/dataset/momask-log"
+    IsPrivate: false
+  - Name: "MOMASK_HOME"
+    Value: "/root/efs/users/zhaohui.yang/dataset/momask-home"
+    IsPrivate: false
+  - Name: "VQ_NAME"
+    Value: "bones_g1_rvq_mixed_root_absxyz_nq6"
+    IsPrivate: false
+  - Name: "RVQ_BATCH_SIZE"
+    Value: "256"
+    IsPrivate: false
+  - Name: "RVQ_MAX_EPOCH"
+    Value: "50"
+    IsPrivate: false
+  - Name: "RVQ_NUM_QUANTIZERS"
+    Value: "6"
+    IsPrivate: false
+  - Name: "IS_CONTINUE"
+    Value: "0"
+    IsPrivate: false
+  - Name: "CUDA_VISIBLE_DEVICES"
+    Value: "0"
+    IsPrivate: false
+  - Name: "OMP_NUM_THREADS"
+    Value: "16"
+    IsPrivate: false
+  - Name: "PYTORCH_CUDA_ALLOC_CONF"
+    Value: "expandable_segments:True"
+    IsPrivate: false
+
+Storages:
+  - Type: "VolcEfs"
+    MountPath: "/root/efs"
+    ReadOnly: false
+    FsName: "DRoboticsAILab"
+    VolcEfsId: "efs-cnbjc8a589e0f6d6f"
+
+AccessType: "Queue"
+Preemptible: false
+Priority: 4
+RetryOptions:
+  EnableRetry: false
+  MaxRetryTimes: 1
+  IntervalSeconds: 120
+  PolicySets: []
