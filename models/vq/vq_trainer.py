@@ -12,6 +12,7 @@ import numpy as np
 from collections import OrderedDict, defaultdict
 from utils.eval_t2m import evaluation_vqvae
 from utils.utils import print_current_loss
+from utils.distributed import barrier, load_state_dict_compat, reduce_sum, set_loader_epoch, unwrap_model
 
 import os
 import sys
@@ -25,9 +26,10 @@ class RVQTokenizerTrainer:
         self.opt = args
         self.vq_model = vq_model
         self.device = args.device
+        self.is_main = getattr(args, 'is_main_process', True)
 
         if args.is_train:
-            self.logger = SummaryWriter(args.log_dir)
+            self.logger = SummaryWriter(args.log_dir) if self.is_main else None
             if args.recons_loss == 'l1':
                 self.l1_criterion = torch.nn.L1Loss()
             elif args.recons_loss == 'l1_smooth':
@@ -70,18 +72,23 @@ class RVQTokenizerTrainer:
         return current_lr
 
     def save(self, file_name, ep, total_it):
+        if not self.is_main:
+            return
         state = {
-            "vq_model": self.vq_model.state_dict(),
+            "vq_model": unwrap_model(self.vq_model).state_dict(),
             "opt_vq_model": self.opt_vq_model.state_dict(),
             "scheduler": self.scheduler.state_dict(),
             'ep': ep,
             'total_it': total_it,
+            'representation': getattr(self.opt, 'representation', None),
         }
         torch.save(state, file_name)
 
     def resume(self, model_dir):
         checkpoint = torch.load(model_dir, map_location=self.device)
-        self.vq_model.load_state_dict(checkpoint['vq_model'])
+        if checkpoint.get('representation') != getattr(self.opt, 'representation', None):
+            raise ValueError('Checkpoint representation/data signature mismatch')
+        load_state_dict_compat(self.vq_model, checkpoint['vq_model'])
         self.opt_vq_model.load_state_dict(checkpoint['opt_vq_model'])
         self.scheduler.load_state_dict(checkpoint['scheduler'])
         return checkpoint['ep'], checkpoint['total_it']
@@ -97,13 +104,16 @@ class RVQTokenizerTrainer:
         if self.opt.is_continue:
             model_dir = pjoin(self.opt.model_dir, 'latest.tar')
             epoch, it = self.resume(model_dir)
-            print("Load model epoch:%d iterations:%d"%(epoch, it))
+            if self.is_main:
+                print("Load model epoch:%d iterations:%d"%(epoch, it))
 
         start_time = time.time()
         total_iters = self.opt.max_epoch * len(train_loader)
-        print(f'Total Epochs: {self.opt.max_epoch}, Total Iters: {total_iters}')
+        if self.is_main:
+            print(f'Total Epochs: {self.opt.max_epoch}, Total Iters: {total_iters}')
         eval_batches = len(eval_val_loader) if eval_val_loader is not None else 0
-        print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_loader), eval_batches))
+        if self.is_main:
+            print('Iters Per Epoch, Training: %04d, Validation: %03d' % (len(train_loader), eval_batches))
         # val_loss = 0
         # min_val_loss = np.inf
         # min_val_epoch = epoch
@@ -113,14 +123,16 @@ class RVQTokenizerTrainer:
         # sys.exit()
         native_g1 = self.opt.dataset_name == 'bones_g1'
         best_val_loss = np.inf
-        if not native_g1:
+        if not native_g1 and self.is_main:
             best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_vqvae(
                 self.opt.model_dir, eval_val_loader, self.vq_model, self.logger, epoch, best_fid=1000,
                 best_div=100, best_top1=0,
                 best_top2=0, best_top3=0, best_matching=100,
                 eval_wrapper=eval_wrapper, save=False)
+        barrier()
 
         while epoch < self.opt.max_epoch:
+            set_loader_epoch(train_loader, epoch)
             self.vq_model.train()
             for i, batch_data in enumerate(train_loader):
                 it += 1
@@ -134,15 +146,16 @@ class RVQTokenizerTrainer:
                 if it >= self.opt.warm_up_iter:
                     self.scheduler.step()
                 
-                logs['loss'] += loss.item()
-                logs['loss_rec'] += loss_rec.item()
-                # Note it not necessarily velocity, too lazy to change the name now
-                logs['loss_vel'] += loss_vel.item()
-                logs['loss_commit'] += loss_commit.item()
-                logs['perplexity'] += perplexity.item()
-                logs['lr'] += self.opt_vq_model.param_groups[0]['lr']
+                if self.is_main:
+                    logs['loss'] += loss.item()
+                    logs['loss_rec'] += loss_rec.item()
+                    # Note it not necessarily velocity, too lazy to change the name now
+                    logs['loss_vel'] += loss_vel.item()
+                    logs['loss_commit'] += loss_commit.item()
+                    logs['perplexity'] += perplexity.item()
+                    logs['lr'] += self.opt_vq_model.param_groups[0]['lr']
 
-                if it % self.opt.log_every == 0:
+                if self.is_main and it % self.opt.log_every == 0:
                     mean_loss = OrderedDict()
                     # self.logger.add_scalar('val_loss', val_loss, it)
                     # self.l
@@ -161,7 +174,9 @@ class RVQTokenizerTrainer:
             # if epoch % self.opt.save_every_e == 0:
             #     self.save(pjoin(self.opt.model_dir, 'E%04d.tar' % (epoch)), epoch, total_it=it)
 
-            print('Validation time:')
+            if self.is_main:
+                print('Validation time:')
+            set_loader_epoch(val_loader, epoch)
             self.vq_model.eval()
             val_loss_rec = []
             val_loss_vel = []
@@ -183,16 +198,29 @@ class RVQTokenizerTrainer:
             # val_loss = val_loss / (len(val_dataloader) + 1)
             # val_loss_rec = val_loss_rec / (len(val_dataloader) + 1)
             # val_loss_emb = val_loss_emb / (len(val_dataloader) + 1)
-            mean_val_loss = sum(val_loss) / len(val_loss)
-            self.logger.add_scalar('Val/loss', mean_val_loss, epoch)
-            self.logger.add_scalar('Val/loss_rec', sum(val_loss_rec) / len(val_loss_rec), epoch)
-            self.logger.add_scalar('Val/loss_vel', sum(val_loss_vel) / len(val_loss_vel), epoch)
-            self.logger.add_scalar('Val/loss_commit', sum(val_loss_commit) / len(val_loss), epoch)
-            self.logger.add_scalar('Val/loss_perplexity', sum(val_perpexity) / len(val_loss_rec), epoch)
+            val_totals = reduce_sum([
+                sum(val_loss),
+                sum(val_loss_rec),
+                sum(val_loss_vel),
+                sum(val_loss_commit),
+                sum(val_perpexity),
+                len(val_loss),
+            ], self.device)
+            val_count = max(val_totals[-1], 1.0)
+            mean_val_loss = val_totals[0] / val_count
+            mean_val_loss_rec = val_totals[1] / val_count
+            mean_val_loss_vel = val_totals[2] / val_count
+            mean_val_loss_commit = val_totals[3] / val_count
+            mean_val_perplexity = val_totals[4] / val_count
+            if self.is_main:
+                self.logger.add_scalar('Val/loss', mean_val_loss, epoch)
+                self.logger.add_scalar('Val/loss_rec', mean_val_loss_rec, epoch)
+                self.logger.add_scalar('Val/loss_vel', mean_val_loss_vel, epoch)
+                self.logger.add_scalar('Val/loss_commit', mean_val_loss_commit, epoch)
+                self.logger.add_scalar('Val/loss_perplexity', mean_val_perplexity, epoch)
 
-            print('Validation Loss: %.5f Reconstruction: %.5f, Velocity: %.5f, Commit: %.5f' %
-                  (sum(val_loss)/len(val_loss), sum(val_loss_rec)/len(val_loss), 
-                   sum(val_loss_vel)/len(val_loss), sum(val_loss_commit)/len(val_loss)))
+                print('Validation Loss: %.5f Reconstruction: %.5f, Velocity: %.5f, Commit: %.5f' %
+                      (mean_val_loss, mean_val_loss_rec, mean_val_loss_vel, mean_val_loss_commit))
 
             # if sum(val_loss) / len(val_loss) < min_val_loss:
             #     min_val_loss = sum(val_loss) / len(val_loss)
@@ -202,16 +230,17 @@ class RVQTokenizerTrainer:
             #     self.save(pjoin(self.opt.model_dir, 'finest.tar'), epoch, it)
             #     print('Best Validation Model So Far!~')
 
-            if native_g1:
+            if native_g1 and self.is_main:
                 if mean_val_loss < best_val_loss:
                     self.save(pjoin(self.opt.model_dir, 'net_best_val.tar'), epoch, it)
                     best_val_loss = mean_val_loss
                     print(f'Best native G1 validation loss: {best_val_loss:.5f}')
-            else:
+            elif not native_g1 and self.is_main:
                 best_fid, best_div, best_top1, best_top2, best_top3, best_matching, writer = evaluation_vqvae(
                     self.opt.model_dir, eval_val_loader, self.vq_model, self.logger, epoch, best_fid=best_fid,
                     best_div=best_div, best_top1=best_top1,
                     best_top2=best_top2, best_top3=best_top3, best_matching=best_matching, eval_wrapper=eval_wrapper)
+            barrier()
 
 
             if native_g1:
@@ -221,7 +250,7 @@ class RVQTokenizerTrainer:
             else:
                 should_plot = epoch % self.opt.eval_every_e == 0
                 vis_samples = 4
-            if plot_eval is not None and should_plot:
+            if self.is_main and plot_eval is not None and should_plot:
                 data = torch.cat(
                     [self.motions[:vis_samples], self.pred_motion[:vis_samples]], dim=0
                 ).detach().cpu().numpy()

@@ -1,0 +1,13 @@
+id: g1_motion_ae70_v1
+bank_format: bones_g1_feature_bank_v1
+extension: extensions/motion_ae_v1
+fps: 20
+velocity_unit: per_second
+velocity_frame: current_heading
+heading_definition: quaternion_wz_projection
+fields:
+  - joint_angles
+  - joint_velocity
+  - root_rotation_anchor6d
+  - root_linear_velocity_body
+  - root_angular_velocity_body

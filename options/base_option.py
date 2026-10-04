@@ -13,6 +13,8 @@ class BaseOptions():
         self.parser.add_argument('--vq_name', type=str, default="rvq_nq1_dc512_nc512", help='Name of the rvq model.')
 
         self.parser.add_argument("--gpu_id", type=int, default=-1, help='GPU id')
+        self.parser.add_argument("--local_rank", "--local-rank", type=int, default=0,
+                                 help="Local rank passed by torchrun")
         self.parser.add_argument('--dataset_name', type=str, default='t2m', help='Dataset Name, {t2m} for humanml3d, {kit} for kit-ml')
         self.parser.add_argument('--checkpoints_dir', type=str, default='./checkpoints', help='models are saved here.')
         self.parser.add_argument('--g1_data_root', type=str, default='./dataset/BONES-G1-rot6d',
@@ -39,21 +41,25 @@ class BaseOptions():
 
         self.opt.is_train = self.is_train
 
-        if self.opt.gpu_id != -1:
+        if "LOCAL_RANK" in os.environ and torch.cuda.is_available():
+            self.opt.local_rank = int(os.environ["LOCAL_RANK"])
+            self.opt.gpu_id = self.opt.local_rank
+
+        if self.opt.gpu_id != -1 and torch.cuda.is_available():
             # self.opt.gpu_id = int(self.opt.gpu_id)
             torch.cuda.set_device(self.opt.gpu_id)
 
         args = vars(self.opt)
 
-        print('------------ Options -------------')
-        for k, v in sorted(args.items()):
-            print('%s: %s' % (str(k), str(v)))
-        print('-------------- End ----------------')
-        if self.is_train:
+        if int(os.environ.get("RANK", "0")) == 0:
+            print('------------ Options -------------')
+            for k, v in sorted(args.items()):
+                print('%s: %s' % (str(k), str(v)))
+            print('-------------- End ----------------')
+        if self.is_train and int(os.environ.get("RANK", "0")) == 0:
             # save to the disk
             expr_dir = os.path.join(self.opt.checkpoints_dir, self.opt.dataset_name, self.opt.name)
-            if not os.path.exists(expr_dir):
-                os.makedirs(expr_dir)
+            os.makedirs(expr_dir, exist_ok=True)
             file_name = os.path.join(expr_dir, 'opt.txt')
             with open(file_name, 'wt') as opt_file:
                 opt_file.write('------------ Options -------------\n')

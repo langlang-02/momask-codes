@@ -5,6 +5,11 @@ class TrainT2MOptions(BaseOptions):
     def initialize(self):
         BaseOptions.initialize(self)
         self.parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
+        self.parser.add_argument('--representation_config', default='', help='G1 feature-bank view matching RVQ metadata')
+        self.parser.add_argument('--vq_checkpoint', default='', help='Explicit RVQ path or filename inside its model directory')
+        self.parser.add_argument('--warm_up_epochs', type=int, default=None, help='Enable epoch-based LR scheduling')
+        self.parser.add_argument('--decay_epochs', nargs='+', type=int, default=[200, 400])
+        self.parser.add_argument('--save_every_e', type=int, default=0, help='Keep an epoch checkpoint; 0 disables')
         self.parser.add_argument('--max_epoch', type=int, default=500, help='Maximum number of epoch for training')
         # self.parser.add_argument('--max_iters', type=int, default=150_000, help='Training iterations')
 

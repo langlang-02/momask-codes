@@ -10,6 +10,8 @@ def arg_parse(is_train=False):
     parser.add_argument('--batch_size', default=256, type=int, help='batch size')
     parser.add_argument('--window_size', type=int, default=64, help='training motion length')
     parser.add_argument("--gpu_id", type=int, default=0, help='GPU id')
+    parser.add_argument("--local_rank", "--local-rank", type=int, default=0,
+                        help="Local rank passed by torchrun")
 
     ## optimization
     parser.add_argument('--max_epoch', default=50, type=int, help='number of total epochs to run')
@@ -23,6 +25,7 @@ def arg_parse(is_train=False):
     parser.add_argument("--commit", type=float, default=0.02, help="hyper-parameter for the commitment loss")
     parser.add_argument('--loss_vel', type=float, default=0.5, help='hyper-parameter for the velocity loss')
     parser.add_argument('--recons_loss', type=str, default='l1_smooth', help='reconstruction loss')
+    parser.add_argument('--representation_config', default=None, help='G1 feature-bank view YAML')
 
     ## vqvae arch
     parser.add_argument("--code_dim", type=int, default=512, help="embedding dimension")
@@ -72,20 +75,38 @@ def arg_parse(is_train=False):
     parser.add_argument("--seed", default=3407, type=int)
 
     opt = parser.parse_args()
-    torch.cuda.set_device(opt.gpu_id)
+    if "LOCAL_RANK" in os.environ and torch.cuda.is_available():
+        opt.local_rank = int(os.environ["LOCAL_RANK"])
+        opt.gpu_id = opt.local_rank
+    if opt.gpu_id != -1 and torch.cuda.is_available():
+        torch.cuda.set_device(opt.gpu_id)
 
     args = vars(opt)
 
-    print('------------ Options -------------')
-    for k, v in sorted(args.items()):
-        print('%s: %s' % (str(k), str(v)))
-    print('-------------- End ----------------')
+    if int(os.environ.get("RANK", "0")) == 0:
+        print('------------ Options -------------')
+        for k, v in sorted(args.items()):
+            print('%s: %s' % (str(k), str(v)))
+        print('-------------- End ----------------')
     opt.is_train = is_train
-    if is_train:
+    if is_train and int(os.environ.get("RANK", "0")) == 0:
     # save to the disk
         expr_dir = os.path.join(opt.checkpoints_dir, opt.dataset_name, opt.name)
-        if not os.path.exists(expr_dir):
-            os.makedirs(expr_dir)
+        from pathlib import Path
+        import json
+        from utils.g1_feature_config import resolve_representation
+
+        saved_spec = Path(expr_dir) / 'meta' / 'representation.json'
+        if saved_spec.exists():
+            if not opt.representation_config or json.loads(saved_spec.read_text()) != resolve_representation(
+                    opt.g1_data_root, opt.representation_config):
+                raise ValueError('Existing experiment representation differs; use a new name')
+        if opt.representation_config:
+            if opt.is_continue and not saved_spec.exists():
+                raise ValueError('Cannot resume without matching representation metadata')
+            if not opt.is_continue and any((Path(expr_dir) / 'model').glob('*.tar')):
+                raise ValueError('Experiment already has checkpoints; resume or use a new name')
+        os.makedirs(expr_dir, exist_ok=True)
         file_name = os.path.join(expr_dir, 'opt.txt')
         with open(file_name, 'wt') as opt_file:
             opt_file.write('------------ Options -------------\n')

@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat, reduce, pack, unpack
@@ -32,6 +33,10 @@ def gumbel_sample(
 
     return ind
 
+
+def dist_is_initialized():
+    return dist.is_available() and dist.is_initialized()
+
 class QuantizeEMAReset(nn.Module):
     def __init__(self, nb_code, code_dim, args):
         super(QuantizeEMAReset, self).__init__()
@@ -60,6 +65,8 @@ class QuantizeEMAReset(nn.Module):
     def init_codebook(self, x):
         out = self._tile(x)
         self.codebook = out[:self.nb_code]
+        if dist_is_initialized():
+            dist.broadcast(self.codebook, src=0)
         self.code_sum = self.codebook.clone()
         self.code_count = torch.ones(self.nb_code, device=self.codebook.device)
         self.init = True
@@ -104,9 +111,14 @@ class QuantizeEMAReset(nn.Module):
 
         code_sum = torch.matmul(code_onehot, x) # nb_code, c
         code_count = code_onehot.sum(dim=-1) # nb_code
+        if dist_is_initialized():
+            dist.all_reduce(code_sum, op=dist.ReduceOp.SUM)
+            dist.all_reduce(code_count, op=dist.ReduceOp.SUM)
 
         out = self._tile(x)
         code_rand = out[:self.nb_code]
+        if dist_is_initialized():
+            dist.broadcast(code_rand, src=0)
 
         # Update centres
         self.code_sum = self.mu * self.code_sum + (1. - self.mu) * code_sum
@@ -165,6 +177,9 @@ class QuantizeEMA(QuantizeEMAReset):
 
         code_sum = torch.matmul(code_onehot, x) # nb_code, c
         code_count = code_onehot.sum(dim=-1) # nb_code
+        if dist_is_initialized():
+            dist.all_reduce(code_sum, op=dist.ReduceOp.SUM)
+            dist.all_reduce(code_count, op=dist.ReduceOp.SUM)
 
         # Update centres
         self.code_sum = self.mu * self.code_sum + (1. - self.mu) * code_sum

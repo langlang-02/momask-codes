@@ -1,8 +1,11 @@
 import os
+import json
+from pathlib import Path
 from os.path import join as pjoin
 
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from models.vq.model import RVQVAE
 from models.vq.vq_trainer import RVQTokenizerTrainer
@@ -19,6 +22,8 @@ from utils.motion_process import recover_from_ric
 from utils.plot_script import plot_3d_motion
 from utils.fixseed import fixseed
 from visualization.plot_g1_joint_angles import plot_joint_angle_batch
+from utils.g1_feature_config import resolve_g1_feature_dim, resolve_representation, load_g1_dataset_info
+from utils.distributed import cleanup_distributed, init_distributed_mode, wrap_ddp
 
 os.environ["OMP_NUM_THREADS"] = "1"
 
@@ -33,6 +38,13 @@ def plot_t2m(data, save_dir):
 
 def plot_g1(data, save_dir):
     data = train_dataset.inv_transform(data)
+    if getattr(opt, 'representation', None):
+        # Existing joint plots consume the native layout; root values are unused.
+        from g1_io import G1_FEATURE_DIM, G1_JOINT_SLICE
+        start, end = opt.representation['feature_layout']['joint_angles']
+        native = np.zeros((*data.shape[:-1], G1_FEATURE_DIM), dtype=data.dtype)
+        native[..., G1_JOINT_SLICE] = data[..., start:end]
+        data = native
     sample_count = len(data) // 2
     plot_joint_angle_batch(
         data[:sample_count],
@@ -46,16 +58,22 @@ def plot_g1(data, save_dir):
 if __name__ == "__main__":
     # torch.autograd.set_detect_anomaly(True)
     opt = arg_parse(True)
+    opt = init_distributed_mode(opt)
+    if opt.representation_config and opt.dataset_name != 'bones_g1':
+        raise ValueError('--representation_config is only supported for bones_g1 RVQ')
     fixseed(opt.seed)
 
-    opt.device = torch.device("cpu" if opt.gpu_id == -1 else "cuda:" + str(opt.gpu_id))
-    print(f"Using Device: {opt.device}")
+    if opt.is_main_process:
+        print(f"Using Device: {opt.device}")
+        if opt.distributed:
+            print(f"Distributed: rank={opt.rank}, local_rank={opt.local_rank}, world_size={opt.world_size}")
 
     opt.save_root = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.name)
     opt.model_dir = pjoin(opt.save_root, 'model')
     opt.meta_dir = pjoin(opt.save_root, 'meta')
     opt.eval_dir = pjoin(opt.save_root, 'g1_visualization' if opt.dataset_name == 'bones_g1' else 'animation')
-    opt.log_dir = pjoin('./log/vq/', opt.dataset_name, opt.name)
+    log_root = os.environ.get('MOMASK_LOG_ROOT', './log')
+    opt.log_dir = pjoin(log_root, 'vq', opt.dataset_name, opt.name)
 
     os.makedirs(opt.model_dir, exist_ok=True)
     os.makedirs(opt.meta_dir, exist_ok=True)
@@ -100,7 +118,21 @@ if __name__ == "__main__":
         opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
         opt.text_dir = pjoin(opt.data_root, 'texts')
         opt.joints_num = 0
-        dim_pose = 38
+        dim_pose = resolve_g1_feature_dim(opt.data_root)
+        opt.representation = None
+        if opt.representation_config:
+            opt.representation = resolve_representation(opt.data_root, opt.representation_config)
+            dim_pose = opt.representation['feature_dim']
+            saved_spec = Path(opt.meta_dir) / 'representation.json'
+            if saved_spec.exists() and json.loads(saved_spec.read_text()) != opt.representation:
+                raise ValueError('Experiment representation changed; use a new experiment name')
+            if opt.is_continue and not saved_spec.exists():
+                raise ValueError('Cannot resume a legacy checkpoint with a feature-bank representation')
+            if opt.is_main_process:
+                saved_spec.write_text(json.dumps(opt.representation, indent=2) + '\n')
+        elif load_g1_dataset_info(opt.data_root).get('format') == 'bones_g1_feature_bank_v1':
+            raise ValueError('Feature bank requires --representation_config')
+        opt.dim_pose = dim_pose
         fps = 20
         radius = 0
         kinematic_chain = None
@@ -119,6 +151,9 @@ if __name__ == "__main__":
 
     mean = np.load(pjoin(opt.data_root, 'Mean.npy'))
     std = np.load(pjoin(opt.data_root, 'Std.npy'))
+    if getattr(opt, 'representation', None):
+        from utils.g1_feature_config import load_representation_stats
+        mean, std = load_representation_stats(opt.data_root, opt.representation)
 
     train_split_file = pjoin(opt.data_root, 'train.txt')
     val_split_file = pjoin(opt.data_root, 'val.txt')
@@ -138,11 +173,16 @@ if __name__ == "__main__":
                 opt.vq_norm)
 
     pc_vq = sum(param.numel() for param in net.parameters())
-    print(net)
+    net.to(opt.device)
+    if opt.distributed:
+        net = wrap_ddp(net, opt)
+
     # print("Total parameters of discriminator net: {}".format(pc_vq))
     # all_params += pc_vq_dis
 
-    print('Total parameters of all models: {}M'.format(pc_vq/1000_000))
+    if opt.is_main_process:
+        print(net)
+        print('Total parameters of all models: {}M'.format(pc_vq/1000_000))
 
     trainer = RVQTokenizerTrainer(opt, vq_model=net)
 
@@ -151,10 +191,26 @@ if __name__ == "__main__":
 
     # Keep undersized native-G1 splits usable for conversion and training smoke tests.
     drop_last = opt.dataset_name != "bones_g1"
-    train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, drop_last=drop_last, num_workers=4,
-                              shuffle=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, drop_last=drop_last, num_workers=4,
-                            shuffle=True, pin_memory=True)
+    train_sampler = DistributedSampler(train_dataset, shuffle=True, drop_last=drop_last) if opt.distributed else None
+    val_sampler = DistributedSampler(val_dataset, shuffle=False, drop_last=False) if opt.distributed else None
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=opt.batch_size,
+        drop_last=drop_last,
+        num_workers=4,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
+        pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=opt.batch_size,
+        drop_last=False,
+        num_workers=4,
+        shuffle=False,
+        sampler=val_sampler,
+        pin_memory=True,
+    )
     if opt.dataset_name == "bones_g1":
         eval_val_loader = None
         plot_eval = plot_g1
@@ -162,6 +218,7 @@ if __name__ == "__main__":
         eval_val_loader, _ = get_dataset_motion_loader(dataset_opt_path, 32, 'val', device=opt.device)
         plot_eval = plot_t2m
     trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper, plot_eval)
+    cleanup_distributed()
 
 ## train_vq.py --dataset_name kit --batch_size 512 --name VQVAE_dp2 --gpu_id 3
 ## train_vq.py --dataset_name kit --batch_size 256 --name VQVAE_dp2_b256 --gpu_id 2

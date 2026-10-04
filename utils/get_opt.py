@@ -3,6 +3,7 @@ from argparse import Namespace
 import re
 from os.path import join as pjoin
 from utils.word_vectorizer import POS_enumerator
+from utils.g1_feature_config import resolve_g1_feature_dim
 
 
 def is_float(numStr):
@@ -87,7 +88,7 @@ def get_opt(opt_path, device, **kwargs):
         opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
         opt.text_dir = pjoin(opt.data_root, 'texts')
         opt.joints_num = 0
-        opt.dim_pose = 38
+        opt.dim_pose = resolve_g1_feature_dim(opt.data_root)
         opt.max_motion_length = 196
         opt.max_motion_frame = 196
         opt.max_motion_token = 55

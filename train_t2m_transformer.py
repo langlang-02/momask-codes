@@ -3,6 +3,7 @@ import torch
 import numpy as np
 
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from os.path import join as pjoin
 
 from models.mask_transformer.transformer import MaskTransformer
@@ -15,11 +16,14 @@ from utils.plot_script import plot_3d_motion
 from utils.motion_process import recover_from_ric
 from utils.get_opt import get_opt
 from utils.fixseed import fixseed
+from utils.g1_feature_config import resolve_g1_feature_dim
+from utils.transformer_training import prepare_g1_inputs, select_vq_checkpoint, bind_vq_checkpoint
 from utils.paramUtil import t2m_kinematic_chain, kit_kinematic_chain
 
 from data.t2m_dataset import Text2MotionDataset
 from motion_loaders.dataset_motion_loader import get_dataset_motion_loader
 from models.t2m_eval_wrapper import EvaluatorModelWrapper
+from utils.distributed import cleanup_distributed, init_distributed_mode, wrap_ddp
 
 
 def plot_t2m(data, save_dir, captions, m_lengths):
@@ -48,30 +52,30 @@ def load_vq_model():
                 vq_opt.dilation_growth_rate,
                 vq_opt.vq_act,
                 vq_opt.vq_norm)
-    checkpoint_dir = pjoin(vq_opt.checkpoints_dir, vq_opt.dataset_name, vq_opt.name, 'model')
-    candidates = ('net_best_val.tar', 'net_best_fid.tar', 'latest.tar')
-    ckpt_path = next((pjoin(checkpoint_dir, name) for name in candidates if os.path.exists(pjoin(checkpoint_dir, name))), None)
-    if ckpt_path is None:
-        raise FileNotFoundError(f'No RVQ checkpoint found in {checkpoint_dir}')
+    ckpt_path = select_vq_checkpoint(opt)
     ckpt = torch.load(ckpt_path, map_location='cpu')
     model_key = 'vq_model' if 'vq_model' in ckpt else 'net'
     vq_model.load_state_dict(ckpt[model_key])
+    vq_model.requires_grad_(False)
+    vq_model.eval()
+    bind_vq_checkpoint(opt, ckpt_path, ckpt)
     print(f'Loading VQ Model {opt.vq_name} from {ckpt_path}')
     return vq_model, vq_opt
 
 if __name__ == '__main__':
     parser = TrainT2MOptions()
     opt = parser.parse()
+    opt = init_distributed_mode(opt)
     fixseed(opt.seed)
 
-    opt.device = torch.device("cpu" if opt.gpu_id == -1 else "cuda:" + str(opt.gpu_id))
     torch.autograd.set_detect_anomaly(True)
 
     opt.save_root = pjoin(opt.checkpoints_dir, opt.dataset_name, opt.name)
     opt.model_dir = pjoin(opt.save_root, 'model')
     # opt.meta_dir = pjoin(opt.save_root, 'meta')
     opt.eval_dir = pjoin(opt.save_root, 'animation')
-    opt.log_dir = pjoin('./log/t2m/', opt.dataset_name, opt.name)
+    log_root = os.environ.get('MOMASK_LOG_ROOT', './log')
+    opt.log_dir = pjoin(log_root, 't2m', opt.dataset_name, opt.name)
 
     os.makedirs(opt.model_dir, exist_ok=True)
     # os.makedirs(opt.meta_dir, exist_ok=True)
@@ -114,7 +118,8 @@ if __name__ == '__main__':
         opt.motion_dir = pjoin(opt.data_root, 'new_joint_vecs')
         opt.joints_num = 0
         opt.max_motion_len = 55
-        dim_pose = 38
+        dim_pose = prepare_g1_inputs(opt)
+        opt.dim_pose = dim_pose
         radius = 0
         fps = 20
         kinematic_chain = None
@@ -154,7 +159,14 @@ if __name__ == '__main__':
     # print("Total parameters of t2m_transformer net: {:.2f}M".format(pc_transformer / 1000_000))
     all_params += pc_transformer
 
-    print('Total parameters of all models: {:.2f}M'.format(all_params / 1000_000))
+    if opt.is_main_process:
+        if opt.distributed:
+            print(f"Distributed: rank={opt.rank}, local_rank={opt.local_rank}, world_size={opt.world_size}")
+        print('Total parameters of all models: {:.2f}M'.format(all_params / 1000_000))
+
+    t2m_transformer.to(opt.device)
+    if opt.distributed:
+        t2m_transformer = wrap_ddp(t2m_transformer, opt, broadcast_buffers=False)
 
     mean = np.load(pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'meta', 'mean.npy'))
     std = np.load(pjoin(opt.checkpoints_dir, opt.dataset_name, opt.vq_name, 'meta', 'std.npy'))
@@ -167,8 +179,24 @@ if __name__ == '__main__':
 
     # Keep undersized native-G1 splits usable for conversion and training smoke tests.
     drop_last = opt.dataset_name != 'bones_g1'
-    train_loader = DataLoader(train_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=drop_last)
-    val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, num_workers=4, shuffle=True, drop_last=drop_last)
+    train_sampler = DistributedSampler(train_dataset, shuffle=True, drop_last=drop_last) if opt.distributed else None
+    val_sampler = DistributedSampler(val_dataset, shuffle=False, drop_last=False) if opt.distributed else None
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=opt.batch_size,
+        num_workers=4,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
+        drop_last=drop_last,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=opt.batch_size,
+        num_workers=4,
+        shuffle=False,
+        sampler=val_sampler,
+        drop_last=False,
+    )
 
     if opt.dataset_name == 'bones_g1':
         eval_val_loader = None
@@ -185,3 +213,4 @@ if __name__ == '__main__':
     trainer = MaskTransformerTrainer(opt, t2m_transformer, vq_model)
 
     trainer.train(train_loader, val_loader, eval_val_loader, eval_wrapper=eval_wrapper, plot_eval=plot_eval)
+    cleanup_distributed()

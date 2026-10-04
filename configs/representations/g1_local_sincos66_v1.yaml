@@ -1,0 +1,12 @@
+id: g1_local_sincos66_v1
+bank_format: bones_g1_feature_bank_v1
+fps: 20
+velocity_unit: per_frame
+velocity_frame: current_heading
+fields:
+  - joint_angles
+  - joint_vel
+  - root_roll_pitch_sincos
+  - root_yaw_vel
+  - root_xy_vel_body
+  - root_height

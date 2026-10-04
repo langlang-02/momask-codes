@@ -24,14 +24,24 @@ class MotionDataset(data.Dataset):
             for line in f.readlines():
                 id_list.append(line.strip())
 
+        representation = getattr(opt, 'representation', None)
+        motion_dir = opt.motion_dir
+        if representation:
+            from utils.g1_feature_config import representation_motion_dir, select_representation_features
+            motion_dir = representation_motion_dir(opt.data_root, representation)
+
         for name in tqdm(id_list):
             try:
-                motion = np.load(pjoin(opt.motion_dir, name + '.npy'))
+                motion = np.load(pjoin(motion_dir, name + '.npy'))
+                if representation:
+                    motion = select_representation_features(motion, opt.data_root, name, representation)
                 if motion.shape[0] < opt.window_size:
                     continue
                 self.lengths.append(motion.shape[0] - opt.window_size)
                 self.data.append(motion)
             except Exception as e:
+                if getattr(opt, 'representation', None):
+                    raise
                 # Some motion may not exist in KIT dataset
                 print(e)
                 pass
@@ -248,9 +258,14 @@ class Text2MotionDataset(data.Dataset):
 
         new_name_list = []
         length_list = []
+        representation = getattr(opt, 'representation', None)
+        if representation:
+            from utils.g1_feature_config import select_representation_features
         for name in tqdm(id_list):
             try:
                 motion = np.load(pjoin(opt.motion_dir, name + '.npy'))
+                if representation:
+                    motion = select_representation_features(motion, opt.data_root, name, representation)
                 if (len(motion)) < min_motion_len or (len(motion) >= 200):
                     continue
                 text_data = []
@@ -297,7 +312,8 @@ class Text2MotionDataset(data.Dataset):
                     new_name_list.append(name)
                     length_list.append(len(motion))
             except Exception as e:
-                # print(e)
+                if representation:
+                    raise RuntimeError(f'Cannot load feature-bank text/motion sample {name}') from e
                 pass
 
         # name_list, length_list = zip(*sorted(zip(new_name_list, length_list), key=lambda x: x[1]))

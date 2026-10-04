@@ -57,7 +57,7 @@ def print_current_loss(start_time, niter_state, total_niters, losses, epoch=None
 
 
     for k, v in losses.items():
-        message += ' %s: %.4f ' % (k, v)
+        message += (' %s: %.3e ' if k == 'lr' else ' %s: %.4f ') % (k, v)
     # message += ' sl_length:%2d tf_ratio:%.2f'%(sl_steps, tf_ratio)
     print(message)
 
